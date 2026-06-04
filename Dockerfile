@@ -18,6 +18,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
+# dist-server inkluderer philosophy/ (.md) – kopieres inn av build-scriptet
 COPY --from=build /app/dist-server ./dist-server
 
 ENV NODE_ENV=production

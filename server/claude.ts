@@ -1,9 +1,32 @@
 import Anthropic from '@anthropic-ai/sdk';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { addToProfile, type ProfileSection } from './profile.js';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Last inn all referanselitteratur (.md) fra philosophy-mappa ved oppstart.
+// Slipp nye .md-filer inn der – de plukkes opp automatisk uten kodeendring.
+function loadPhilosophy(): string {
+  const dir = path.resolve(__dirname, 'philosophy');
+  try {
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.md'))
+      .sort();
+    const parts = files.map((f) => fs.readFileSync(path.join(dir, f), 'utf-8'));
+    return parts.join('\n\n');
+  } catch {
+    return '';
+  }
+}
+
+const PHILOSOPHY = loadPhilosophy();
 
 export type ChatMessage = {
   role: 'user' | 'assistant';
@@ -83,12 +106,30 @@ export async function chat(opts: {
   trainingContext?: string;
   profileContext?: string;
 }): Promise<{ text: string; usage: any; saved?: { section: string; content: string }[] }> {
-  let system = SYSTEM_PROMPT;
+  // Fast del (system-prompt + Bakken-referanse) endrer seg aldri → caches.
+  // Dynamisk del (profil + treningsdata) varierer per forespørsel → ucachet.
+  let staticSystem = SYSTEM_PROMPT;
+  if (PHILOSOPHY) {
+    staticSystem += `\n\n--- REFERANSE: MARIUS BAKKEN-METODEN (fast kunnskapsgrunnlag) ---\n${PHILOSOPHY}`;
+  }
+
+  const dynamicParts: string[] = [];
   if (opts.profileContext) {
-    system += `\n\n${opts.profileContext}`;
+    dynamicParts.push(opts.profileContext);
   }
   if (opts.trainingContext) {
-    system += `\n\n--- BRUKERENS TRENINGSDATA ---\n${opts.trainingContext}`;
+    dynamicParts.push(`--- BRUKERENS TRENINGSDATA ---\n${opts.trainingContext}`);
+  }
+
+  const system: Anthropic.TextBlockParam[] = [
+    {
+      type: 'text',
+      text: staticSystem,
+      cache_control: { type: 'ephemeral' },
+    },
+  ];
+  if (dynamicParts.length > 0) {
+    system.push({ type: 'text', text: dynamicParts.join('\n\n') });
   }
 
   const response = await client.messages.create({
