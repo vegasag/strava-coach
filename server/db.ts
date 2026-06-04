@@ -138,6 +138,17 @@ export function getRecentActivities(athleteId: number, sinceDate: string) {
     .all(athleteId, sinceDate) as any[];
 }
 
+export function getLatestActivities(athleteId: number, limit: number) {
+  return db
+    .prepare(
+      `SELECT * FROM activities
+       WHERE athlete_id = ?
+       ORDER BY start_date DESC
+       LIMIT ?`,
+    )
+    .all(athleteId, limit) as any[];
+}
+
 export function getLatestActivityDate(athleteId: number): string | undefined {
   const row = db
     .prepare(

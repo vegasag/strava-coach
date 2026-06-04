@@ -13,16 +13,16 @@ const ZONE_LABELS: Record<Zone, string> = {
   above: 'Over terskel',
 };
 
-// Bakken zones as % of max HR:
-//   Easy:      <80% (recovery + aerobic base)
-//   Gray zone: 80-87% (too hard for easy, too easy for threshold)
-//   Threshold: 87-93% (lactate threshold range)
-//   Above:     >93% (VO2max / anaerobic)
+// Bakken zones as % of max HR (per Bakken-modellen):
+//   Easy/Rolig:   <70% (recovery + aerobic base)
+//   Gray/Grå:     70-80% (too hard for easy, too easy for threshold — avoid)
+//   Threshold:    80-87% ("den gylne sonen" — the golden threshold zone)
+//   Above:        >87% (over threshold + VO2max / anaerobic)
 function classifyHR(hr: number, maxHR: number): Zone {
   const pct = hr / maxHR;
-  if (pct < 0.80) return 'easy';
-  if (pct < 0.87) return 'gray';
-  if (pct < 0.93) return 'threshold';
+  if (pct < 0.70) return 'easy';
+  if (pct < 0.80) return 'gray';
+  if (pct < 0.87) return 'threshold';
   return 'above';
 }
 
@@ -168,4 +168,5 @@ export function getMonthlyZoneAnalysis(maxHR: number = DEFAULT_MAX_HR): MonthlyZ
   return result;
 }
 
-export { ZONE_LABELS, DEFAULT_MAX_HR };
+export { ZONE_LABELS, DEFAULT_MAX_HR, analyzeActivityZones };
+export type { Zone };

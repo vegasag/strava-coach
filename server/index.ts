@@ -9,6 +9,7 @@ import {
 import {
   getTokens,
   getRecentActivities,
+  getLatestActivities,
   saveActivity,
   saveActivityDetail,
   getActivitiesWithoutDetail,
@@ -23,7 +24,11 @@ import {
   formatProfileForLLM,
   isValidSection,
 } from './profile.js';
-import { getMonthlyZoneAnalysis } from './analysis.js';
+import {
+  getMonthlyZoneAnalysis,
+  analyzeActivityZones,
+  DEFAULT_MAX_HR,
+} from './analysis.js';
 
 export const app = new Hono();
 
@@ -148,6 +153,20 @@ app.get('/api/analysis/zones', (c) => {
   const maxHR = Number(c.req.query('max_hr') ?? 200);
   const data = getMonthlyZoneAnalysis(maxHR);
   return c.json({ max_hr: maxHR, months: data });
+});
+
+// --- Claude-eksport: formaterte øktdetaljer klar for copy-paste ---
+
+app.get('/api/export/claude', (c) => {
+  const tokens = getTokens();
+  if (!tokens) return c.json({ error: 'not connected' }, 401);
+
+  const count = Math.min(Math.max(Number(c.req.query('count') ?? 5), 1), 10);
+  const maxHR = Number(c.req.query('max_hr') ?? DEFAULT_MAX_HR);
+  const acts = getLatestActivities(tokens.athlete_id, count);
+
+  const text = formatActivitiesForExport(acts, maxHR);
+  return c.json({ text, count: acts.length, max_hr: maxHR });
 });
 
 app.get('/api/activities', (c) => {
@@ -379,4 +398,120 @@ function formatPace(secPerKm: number): string {
   const m = Math.floor(secPerKm / 60);
   const s = Math.round(secPerKm % 60);
   return `${m}:${String(s).padStart(2, '0')}/km`;
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.round(seconds % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+const WEEKDAYS = [
+  'søndag', 'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag',
+];
+
+const WORKOUT_TYPES: Record<number, string> = {
+  0: 'standard', 1: 'løp (konkurranse)', 2: 'langtur',
+  3: 'intervall/fartlek', 10: 'standard', 11: 'tempo', 12: 'terskel',
+};
+
+const ZONE_ORDER: { key: 'easy' | 'gray' | 'threshold' | 'above'; label: string }[] = [
+  { key: 'easy', label: 'Rolig' },
+  { key: 'gray', label: 'Grå' },
+  { key: 'threshold', label: 'Terskel' },
+  { key: 'above', label: 'Over' },
+];
+
+// Formaterer de siste øktene som en ren tekstblokk klar til å lime inn i Claude.
+function formatActivitiesForExport(acts: any[], maxHR: number): string {
+  if (acts.length === 0) {
+    return 'Ingen økter funnet. Synk fra Strava først.';
+  }
+
+  const blocks: string[] = [];
+  blocks.push(
+    `Treningsøkter (siste ${acts.length}, nyeste først). Soner basert på makspuls ${maxHR}.`,
+  );
+
+  acts.forEach((a, i) => {
+    const raw = a.raw_json ? JSON.parse(a.raw_json) : {};
+    const detail = a.detail_json ? JSON.parse(a.detail_json) : null;
+
+    // Dato/klokkeslett: bruk lokal tid fra Strava når tilgjengelig
+    const localStr: string = raw.start_date_local || a.start_date;
+    const datePart = localStr.slice(0, 10);
+    const timePart = localStr.slice(11, 16);
+    const weekday = WEEKDAYS[new Date(datePart + 'T00:00:00').getDay()] ?? '';
+
+    const km = (a.distance / 1000).toFixed(2);
+    const dur = formatDuration(a.moving_time);
+    const pace = a.average_speed > 0 ? formatPace(1000 / a.average_speed) : '–';
+    const avgHr = a.average_heartrate ? `${Math.round(a.average_heartrate)} bpm` : '–';
+    const maxHr = a.max_heartrate ? `${Math.round(a.max_heartrate)} bpm` : '–';
+
+    const lines: string[] = [];
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push(`Økt ${i + 1}`);
+    lines.push(`Dato: ${datePart} (${weekday})`);
+    lines.push(`Klokkeslett: ${timePart}`);
+    lines.push(`Tittel: ${a.name ?? '(uten navn)'}`);
+    lines.push(`Type: ${a.type}`);
+
+    const desc = detail?.description?.trim();
+    lines.push(`Beskrivelse: ${desc ? desc : '(ingen)'}`);
+
+    lines.push(`Distanse: ${km} km | Totaltid: ${dur} | Snittfart: ${pace}`);
+    lines.push(`Snittpuls: ${avgHr} | Makspuls: ${maxHr}`);
+
+    // Tilleggsinfo (kun det som finnes)
+    const meta: string[] = [];
+    if (detail?.perceived_exertion) meta.push(`RPE: ${detail.perceived_exertion}/10`);
+    if (detail?.average_cadence) meta.push(`Kadens: ${Math.round(detail.average_cadence * 2)} spm`);
+    if (a.total_elevation_gain > 0) meta.push(`Høydemeter: +${Math.round(a.total_elevation_gain)} m`);
+    if (detail?.workout_type != null && detail.workout_type !== 0) {
+      const wt = WORKOUT_TYPES[detail.workout_type];
+      if (wt) meta.push(`Økttype: ${wt}`);
+    }
+    if (meta.length > 0) lines.push(meta.join(' | '));
+
+    // Runder (laps) med fart og puls
+    if (detail?.laps && detail.laps.length > 1) {
+      lines.push('');
+      lines.push(`Runder (${detail.laps.length}):`);
+      for (const lap of detail.laps) {
+        const lapKm = (lap.distance / 1000).toFixed(2);
+        const lapDur = formatDuration(lap.moving_time);
+        const lapPace = lap.average_speed > 0 ? formatPace(1000 / lap.average_speed) : '–';
+        const lapHr = lap.average_heartrate ? `${Math.round(lap.average_heartrate)} bpm` : '–';
+        const lapMax = lap.max_heartrate ? ` (maks ${Math.round(lap.max_heartrate)})` : '';
+        lines.push(
+          `  ${lap.lap_index}: ${lapKm} km — ${lapDur} — ${lapPace} — ${lapHr}${lapMax}`,
+        );
+      }
+    }
+
+    // Totaltid i hver sone
+    const zones = analyzeActivityZones(a, maxHR);
+    const totalZoneMin = zones.easy + zones.gray + zones.threshold + zones.above;
+    lines.push('');
+    if (totalZoneMin > 0) {
+      lines.push('Tid i soner:');
+      for (const { key, label } of ZONE_ORDER) {
+        const min = zones[key];
+        if (min <= 0) continue;
+        const pct = Math.round((min / totalZoneMin) * 100);
+        lines.push(`  ${label}: ${Math.round(min)} min (${pct}%)`);
+      }
+    } else {
+      lines.push('Tid i soner: (ingen pulsdata)');
+    }
+
+    blocks.push(lines.join('\n'));
+  });
+
+  return blocks.join('\n');
 }

@@ -44,6 +44,10 @@ export function App() {
   const abortRef = useRef<AbortController | null>(null);
   const [zones, setZones] = useState<MonthZone[]>([]);
   const [showZones, setShowZones] = useState(false);
+  const [exportCount, setExportCount] = useState(5);
+  const [exportText, setExportText] = useState('');
+  const [exportLoading, setExportLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch('/api/status')
@@ -66,6 +70,30 @@ export function App() {
     const d = await r.json();
     setZones((d.months ?? []).reverse());
     setShowZones(true);
+  }
+
+  async function generateExport() {
+    setExportLoading(true);
+    setCopied(false);
+    try {
+      const r = await fetch(`/api/export/claude?count=${exportCount}`);
+      const d = await r.json();
+      setExportText(d.text ?? d.error ?? '');
+    } catch (e: any) {
+      setExportText(`Feil: ${e.message}`);
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  async function copyExport() {
+    try {
+      await navigator.clipboard.writeText(exportText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard kan være blokkert – brukeren kan markere teksten manuelt
+    }
   }
 
   async function sync() {
@@ -229,6 +257,47 @@ export function App() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <div className="section-header">
+          <h2>Claude-info om økter</h2>
+          <div className="export-controls">
+            <label>
+              Antall:
+              <select
+                value={exportCount}
+                onChange={(e) => setExportCount(Number(e.target.value))}
+              >
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="btn"
+              onClick={generateExport}
+              disabled={exportLoading}
+            >
+              {exportLoading ? 'Henter…' : 'Lag Claude-info om treningsøkter'}
+            </button>
+          </div>
+        </div>
+        {exportText && (
+          <div className="export-output">
+            <div className="export-output-header">
+              <span className="export-hint">
+                Kopier og lim inn i samtalen din med Claude.
+              </span>
+              <button className="btn" onClick={copyExport}>
+                {copied ? 'Kopiert ✓' : 'Kopier'}
+              </button>
+            </div>
+            <textarea className="export-text" readOnly value={exportText} />
           </div>
         )}
       </section>
