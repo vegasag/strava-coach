@@ -1,0 +1,23 @@
+app = 'strava-coach'
+primary_region = 'arn'
+
+[build]
+
+[env]
+  DB_PATH = '/data/data.db'
+  PROFILE_PATH = '/data/user_profile.json'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[mounts]
+  source = 'strava_data'
+  destination = '/data'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-server
+.env
+*.db
+*.db-journal
+.DS_Store
+.vite
+.git

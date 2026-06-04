@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.resolve(__dirname, '../data.db');
+const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../data.db');
 
 export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
@@ -75,11 +75,24 @@ export function getTokens(athleteId?: number): StravaTokens | undefined {
 
 export function saveActivity(athleteId: number, raw: any) {
   db.prepare(
-    `INSERT OR REPLACE INTO activities
+    `INSERT INTO activities
      (id, athlete_id, start_date, type, name, distance, moving_time,
       elapsed_time, total_elevation_gain, average_heartrate, max_heartrate,
       average_speed, raw_json, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+      start_date = excluded.start_date,
+      type = excluded.type,
+      name = excluded.name,
+      distance = excluded.distance,
+      moving_time = excluded.moving_time,
+      elapsed_time = excluded.elapsed_time,
+      total_elevation_gain = excluded.total_elevation_gain,
+      average_heartrate = excluded.average_heartrate,
+      max_heartrate = excluded.max_heartrate,
+      average_speed = excluded.average_speed,
+      raw_json = excluded.raw_json,
+      fetched_at = excluded.fetched_at`,
   ).run(
     raw.id,
     athleteId,

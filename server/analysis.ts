@@ -2,7 +2,7 @@ import { db } from './db.js';
 
 // Marius Bakken intensity zones based on % of max HR
 // Estimated max HR from user's test data and race results
-const DEFAULT_MAX_HR = 200;
+const DEFAULT_MAX_HR = 189;
 
 type Zone = 'easy' | 'gray' | 'threshold' | 'above';
 
