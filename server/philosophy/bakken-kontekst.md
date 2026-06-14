@@ -8,15 +8,17 @@
 - Variasjon innenfor terskelområdet er bevisst og nødvendig.
 - Respekter restitusjon: rolige dager skal være VIRKELIG rolige, "ingenting annet".
 
-## SONER (HRmax 190 = Vegards estimat; juster ved verifisert maks)
-| Sone | %HRmax | bpm@190 | Laktat | Bruk |
+## SONER (Vegards HRmax = 200, verifisert via 2020-test (203-204) justert for alder)
+| Sone | %HRmax | bpm@200 | Laktat | Bruk |
 |---|---|---|---|---|
-| Rolig | <70% | <133 | lavt | All rolig trening, fundament, restitusjon |
-| Grå (UNNGÅ) | 70–80% | 133–152 | moderat | Ineffektiv – for hard for rolig, for lett for terskel |
-| Gylne sonen | 80–87% | 152–165 | 2,0–3,0 mmol/L | ALL terskel + de fleste intervaller |
-| Over terskel | 87–90% | 165–171 | stiger | Korte drag, 45/15 høy intensitet |
-| Høyintensiv | >90% | >171 | akkumulerer | Svært sparsomt: X-økt, konkfart, bakke |
+| Rolig | <70% | <140 | lavt | All rolig trening, fundament, restitusjon |
+| Grå (UNNGÅ) | 70–80% | 140–160 | moderat | Ineffektiv – for hard for rolig, for lett for terskel |
+| Gylne sonen | 80–87% | 160–174 | 2,0–3,0 mmol/L | ALL terskel + de fleste intervaller |
+| Over terskel | 87–90% | 174–180 | stiger | Korte drag, 45/15 høy intensitet |
+| Høyintensiv | >90% | >180 | akkumulerer | Svært sparsomt: X-økt, konkfart, bakke |
 
+VIKTIG: Vegard har uvanlig høy makspuls. Absolutte tall som virker "skyhøye" (180+) er
+bare ~90% for ham – ikke rødt felt. Snakketest + følelse er beste ledesnorer.
 Snakketest: rolig=hele setninger fritt; terskel=3–5 ord før pust; for hardt=enkeltord.
 Terskelfart ≈ mellom 10km- og halvmaratonfart. Sonene bygges NED fra terskel, ikke opp fra maks.
 
@@ -120,20 +122,24 @@ Karbo før/etter kvalitet. Etter hard økt: karbo+protein 3:1 innen 30min. Faste
 Mat under økt kun >90min. Tilstrekkelig totalinntak viktigst (underspising = dårlig restitusjon, dårlig vevsreparasjon → relevant for skadeforebygging).
 
 ## VEGARD – PROFIL
-- 2m, slank, 33 år, HRmax ~190 (estimat), terskel-puls ~152-165.
+- 2m, slank, 33 år. HRmax = 200 (arbeidstall; 2020-test viste 203-204, justert ned for alder).
+- Terskel-puls ~160-174 (gylne sonen). Høy maks for alderen – normalt, ikke patologisk.
 - Comeback etter 3 år (to barn, selskap, flytting). Nå 30-60 km/uke, 1-2 terskeløkter/uke.
 - Mål: halvmaraton/maraton. Mosjonist-nivå (kap 7).
-- KNE: venstre lateralt, blusser opp ved for rask progresjon. Volum før intensitet. Forebyggende glutes-styrke.
-- Møllø-økter: 1% incline med mindre annet nevnt.
-- Bruker Polar Verity Sense (overarm optisk) for puls.
+- KNE: venstre lateralt, blusset opp tidligere – men per juni 2026 KVITTERT UT/symptomfri.
+  Fortsatt: volum før intensitet, forebyggende glutes-styrke som vedlikehold.
+- Mølleøkter: 1% incline med mindre annet nevnt.
+- Bruker Polar Verity Sense (overarm optisk) for puls. NB: sjekk at sensor faktisk
+  fungerer før makstest/viktige økter – har sviktet på avgjørende intervall før.
 
 ## RÅDGIVNINGS-REGLER FOR LLM
-1. Sjekk dagsform + knerespons ved terskelforslag.
+1. Sjekk dagsform + knerespons ved terskelforslag (kneet er nå friskt, men følg med).
 2. Comeback-fase: volum FØR intensitet, hold igjen ved tvil.
-3. Rolige dager = virkelig rolige (<133 bpm). Aldri grå sone.
+3. Rolige dager = virkelig rolige (<140 bpm). Aldri grå sone (140-160).
 4. Ikke 45/15 eller kvalitet dagen etter hard økt.
-5. Dobbel terskel = ikke nå (krever skadefrihet/erfaring).
+5. Dobbel terskel = ikke standard ennå (vurder når godt etablert + fortsatt skadefri).
 6. Forebyggende styrke: på rolige dager el etter terskel, ikke dagen før kvalitet.
 7. Knesmerte-regel: stabil 1-2/10 fortsett m/årvåkenhet; stigende uansett nivå → avslutt; ≥3-4/10 el skarp → stopp.
 8. Ikke medisinsk diagnose – henvis til fysio ved vedvarende/hevelse/låsning.
 9. Svar på bokmål, konkret, referer modellens øktstrukturer.
+10. Husk Vegards høye maks: ikke tolk 180+ bpm som faretegn – det er ~90% for ham.

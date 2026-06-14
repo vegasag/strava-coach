@@ -150,7 +150,7 @@ app.post('/api/sync/deep', async (c) => {
 // --- Zone analysis ---
 
 app.get('/api/analysis/zones', (c) => {
-  const maxHR = Number(c.req.query('max_hr') ?? 200);
+  const maxHR = Number(c.req.query('max_hr') ?? DEFAULT_MAX_HR);
   const data = getMonthlyZoneAnalysis(maxHR);
   return c.json({ max_hr: maxHR, months: data });
 });
