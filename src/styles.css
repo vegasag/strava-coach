@@ -53,121 +53,12 @@ h2 { font-size: 1.1rem; margin: 24px 0 8px; }
   .activities { border-color: #333; }
   .activities li { border-bottom-color: #222; }
 }
-.chat {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 200px;
-  margin-bottom: 12px;
-}
-.msg {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f0f0f0;
-}
-.msg.user { background: #e8f4fd; }
-@media (prefers-color-scheme: dark) {
-  .msg { background: #222; }
-  .msg.user { background: #1e3a52; }
-}
-.msg .role {
-  font-size: 0.75rem;
-  font-weight: 600;
-  opacity: 0.7;
-  margin-bottom: 4px;
-}
-.msg .content { white-space: pre-wrap; }
-.msg.thinking {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.btn.cancel {
-  padding: 4px 12px;
-  font-size: 0.8rem;
-  border-color: #e53935;
-  color: #e53935;
-}
-.saved-indicator {
-  margin-top: 8px;
-  padding: 6px 10px;
-  background: #e8f5e9;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  color: #2e7d32;
-}
-@media (prefers-color-scheme: dark) {
-  .saved-indicator { background: #1b3a1b; color: #81c784; }
-}
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 .section-header h2 { margin-right: 12px; }
-.zone-table-wrap {
-  overflow-x: auto;
-  margin-top: 8px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  max-height: 500px;
-  overflow-y: auto;
-}
-@media (prefers-color-scheme: dark) {
-  .zone-table-wrap { border-color: #333; }
-}
-.zone-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.85rem;
-  cursor: default;
-  user-select: none;
-}
-.zone-table th, .zone-table td {
-  padding: 6px 8px;
-  text-align: right;
-  border-bottom: 1px solid #eee;
-  white-space: nowrap;
-}
-@media (prefers-color-scheme: dark) {
-  .zone-table th, .zone-table td { border-bottom-color: #222; }
-}
-.zone-table th {
-  position: sticky;
-  top: 0;
-  background: #fafafa;
-  font-weight: 600;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-@media (prefers-color-scheme: dark) {
-  .zone-table th { background: #1a1a1a; }
-}
-.zone-table .month-cell { text-align: left; font-weight: 600; }
-.zone-col { min-width: 80px; }
-.zone-bar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 18px;
-}
-.zone-bar .bar {
-  height: 100%;
-  border-radius: 3px;
-  min-width: 0;
-  transition: width 0.3s;
-}
-.zone-bar .pct {
-  font-size: 0.75rem;
-  opacity: 0.8;
-  min-width: 28px;
-  text-align: right;
-}
-.bar.easy { background: #4caf50; }
-.bar.gray { background: #ff9800; }
-.bar.threshold { background: #f44336; }
-.bar.above { background: #9c27b0; }
 .export-controls {
   display: flex;
   gap: 8px;
@@ -217,20 +108,4 @@ h2 { font-size: 1.1rem; margin: 24px 0 8px; }
 }
 @media (prefers-color-scheme: dark) {
   .export-text { background: #1a1a1a; border-color: #333; }
-}
-.composer {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-.composer textarea {
-  flex: 1;
-  min-height: 60px;
-  padding: 8px;
-  font: inherit;
-  border: 1px solid #888;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  resize: vertical;
 }
