@@ -150,34 +150,34 @@ export function setTenantAthleteId(tenantId: number, athleteId: number) {
   );
 }
 
-export function saveTokens(t: StravaTokens) {
+export function saveTokensForTenant(tenantId: number, t: StravaTokens) {
   db.prepare(
-    `INSERT OR REPLACE INTO strava_tokens
-     (athlete_id, access_token, refresh_token, expires_at)
-     VALUES (?, ?, ?, ?)`,
-  ).run(t.athlete_id, t.access_token, t.refresh_token, t.expires_at);
+    `INSERT INTO strava_tokens
+     (athlete_id, access_token, refresh_token, expires_at, tenant_id)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(athlete_id) DO UPDATE SET
+      access_token = excluded.access_token,
+      refresh_token = excluded.refresh_token,
+      expires_at = excluded.expires_at,
+      tenant_id = excluded.tenant_id`,
+  ).run(t.athlete_id, t.access_token, t.refresh_token, t.expires_at, tenantId);
 }
 
-export function getTokens(athleteId?: number): StravaTokens | undefined {
-  if (athleteId) {
-    return db
-      .prepare('SELECT * FROM strava_tokens WHERE athlete_id = ?')
-      .get(athleteId) as StravaTokens | undefined;
-  }
-  // Single-user mode: bare ta første raden
-  return db.prepare('SELECT * FROM strava_tokens LIMIT 1').get() as
-    | StravaTokens
-    | undefined;
+export function getTokensByTenant(tenantId: number): StravaTokens | undefined {
+  return db
+    .prepare('SELECT * FROM strava_tokens WHERE tenant_id = ?')
+    .get(tenantId) as StravaTokens | undefined;
 }
 
-export function saveActivity(athleteId: number, raw: any) {
+export function saveActivity(tenantId: number, athleteId: number, raw: any) {
   db.prepare(
     `INSERT INTO activities
-     (id, athlete_id, start_date, type, name, distance, moving_time,
+     (id, tenant_id, athlete_id, start_date, type, name, distance, moving_time,
       elapsed_time, total_elevation_gain, average_heartrate, max_heartrate,
       average_speed, raw_json, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
+      tenant_id = excluded.tenant_id,
       start_date = excluded.start_date,
       type = excluded.type,
       name = excluded.name,
@@ -192,6 +192,7 @@ export function saveActivity(athleteId: number, raw: any) {
       fetched_at = excluded.fetched_at`,
   ).run(
     raw.id,
+    tenantId,
     athleteId,
     raw.start_date,
     raw.type,
@@ -214,46 +215,59 @@ export function saveActivityDetail(activityId: number, detail: any) {
   ).run(JSON.stringify(detail), activityId);
 }
 
-export function getActivitiesWithoutDetail(athleteId: number): number[] {
+export function getActivitiesWithoutDetail(tenantId: number): number[] {
   const rows = db
     .prepare(
       `SELECT id FROM activities
-       WHERE athlete_id = ? AND detail_json IS NULL
+       WHERE tenant_id = ? AND detail_json IS NULL
        ORDER BY start_date DESC`,
     )
-    .all(athleteId) as { id: number }[];
+    .all(tenantId) as { id: number }[];
   return rows.map((r) => r.id);
 }
 
-export function getRecentActivities(athleteId: number, sinceDate: string) {
+export function getRecentActivities(tenantId: number, sinceDate: string) {
   return db
     .prepare(
       `SELECT * FROM activities
-       WHERE athlete_id = ? AND start_date >= ?
+       WHERE tenant_id = ? AND start_date >= ?
        ORDER BY start_date DESC`,
     )
-    .all(athleteId, sinceDate) as any[];
+    .all(tenantId, sinceDate) as any[];
 }
 
-export function getLatestActivities(athleteId: number, limit: number) {
+export function getLatestActivities(tenantId: number, limit: number) {
   return db
     .prepare(
       `SELECT * FROM activities
-       WHERE athlete_id = ?
+       WHERE tenant_id = ?
        ORDER BY start_date DESC
        LIMIT ?`,
     )
-    .all(athleteId, limit) as any[];
+    .all(tenantId, limit) as any[];
 }
 
-export function getLatestActivityDate(athleteId: number): string | undefined {
+export function getLatestActivityDate(tenantId: number): string | undefined {
   const row = db
     .prepare(
       `SELECT start_date FROM activities
-       WHERE athlete_id = ? ORDER BY start_date DESC LIMIT 1`,
+       WHERE tenant_id = ? ORDER BY start_date DESC LIMIT 1`,
     )
-    .get(athleteId) as { start_date: string } | undefined;
+    .get(tenantId) as { start_date: string } | undefined;
   return row?.start_date;
+}
+
+export function countActivities(tenantId: number): number {
+  const { n } = db
+    .prepare('SELECT COUNT(*) AS n FROM activities WHERE tenant_id = ?')
+    .get(tenantId) as { n: number };
+  return n;
+}
+
+export function deleteTenant(tenantId: number) {
+  db.prepare('DELETE FROM activities WHERE tenant_id = ?').run(tenantId);
+  db.prepare('DELETE FROM strava_tokens WHERE tenant_id = ?').run(tenantId);
+  db.prepare('DELETE FROM tenants WHERE id = ?').run(tenantId);
 }
 
 // One-time migration: turn the existing single-user DB into tenant "vegard".

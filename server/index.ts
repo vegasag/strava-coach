@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { createHmac, randomBytes } from 'crypto';
 import {
   getAuthorizeUrl,
   exchangeCodeForToken,
@@ -6,158 +7,227 @@ import {
   getActivityDetail,
 } from './strava.js';
 import {
-  getTokens,
+  getTokensByTenant,
   getRecentActivities,
   getLatestActivities,
   saveActivity,
   saveActivityDetail,
   getActivitiesWithoutDetail,
   getLatestActivityDate,
+  createTenant,
+  getTenantById,
+  getTenantBySlug,
+  listTenants,
+  setTenantAthleteId,
+  countActivities,
+  deleteTenant,
+  type Tenant,
 } from './db.js';
-import {
-  analyzeActivityZones,
-  DEFAULT_MAX_HR,
-} from './analysis.js';
+import { analyzeActivityZones } from './analysis.js';
 
-export const app = new Hono();
+type Env = { Variables: { tenant: Tenant } };
+export const app = new Hono<Env>();
 
-// --- Strava OAuth ---
+// Slugs som ikke kan brukes som tenant (kolliderer med ruter/statiske filer).
+const RESERVED = new Set([
+  'api', 'auth', 'admin', 'assets', 'favicon.ico', 'robots.txt',
+]);
 
-app.get('/auth/strava', (c) => {
-  return c.redirect(getAuthorizeUrl());
+function hashPin(pin: string): string {
+  return createHmac('sha256', process.env.SESSION_SECRET ?? 'dev-secret')
+    .update(pin)
+    .digest('hex');
+}
+
+// Delt sync-logikk for både tenant-endepunkt og admin-trigget sync.
+async function runSync(
+  tenant: Tenant,
+  opts: { deep?: boolean; years?: number; detailsOnly?: boolean },
+) {
+  const deep = opts.deep ?? false;
+  const detailsOnly = opts.detailsOnly ?? false;
+  let total = 0;
+
+  if (!detailsOnly) {
+    let after: number;
+    if (deep) {
+      const years = opts.years ?? 5;
+      after = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 365 * years;
+    } else {
+      const latest = getLatestActivityDate(tenant.id);
+      after = latest
+        ? Math.floor(new Date(latest).getTime() / 1000)
+        : Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 90;
+    }
+    let page = 1;
+    const maxPages = deep ? 100 : 20;
+    while (true) {
+      let batch: any[];
+      try {
+        batch = await listActivities(tenant, { after, page, per_page: 50 });
+      } catch {
+        break; // rate limited
+      }
+      if (batch.length === 0) break;
+      for (const a of batch) saveActivity(tenant.id, tenant.athlete_id!, a);
+      total += batch.length;
+      if (batch.length < 50) break;
+      page++;
+      if (page > maxPages) break;
+    }
+  }
+
+  const needDetail = getActivitiesWithoutDetail(tenant.id);
+  let details = 0;
+  let errors = 0;
+  for (const actId of needDetail) {
+    try {
+      const detail = await getActivityDetail(tenant, actId);
+      saveActivityDetail(actId, detail);
+      details++;
+      if (deep && details % 2 === 0) await new Promise((r) => setTimeout(r, 1000));
+    } catch {
+      errors++;
+      if (deep && errors > 3) break;
+    }
+  }
+
+  return {
+    synced: total,
+    details_fetched: details,
+    detail_errors: errors,
+    remaining: needDetail.length - details,
+  };
+}
+
+// ============================================================
+// Admin (global) — auth legges på i steg 5
+// ============================================================
+
+app.get('/admin/api/tenants', (c) => {
+  const tenants = listTenants().map((t) => ({
+    id: t.id,
+    slug: t.slug,
+    display_name: t.display_name,
+    max_hr: t.max_hr,
+    athlete_id: t.athlete_id,
+    connected: !!getTokensByTenant(t.id),
+    activity_count: countActivities(t.id),
+    last_activity: getLatestActivityDate(t.id) ?? null,
+    has_own_creds: !!t.strava_client_id,
+    has_pin: !!t.pin_hash,
+  }));
+  return c.json({ tenants });
 });
+
+app.post('/admin/api/tenants', async (c) => {
+  const body = await c.req.json();
+  const { slug, display_name, max_hr, strava_client_id, strava_client_secret, pin } = body;
+
+  if (!/^[a-z][a-z0-9-]{1,30}$/.test(slug ?? '')) {
+    return c.json({ error: 'ugyldig slug (a-z, tall, bindestrek)' }, 400);
+  }
+  if (RESERVED.has(slug)) return c.json({ error: 'reservert slug' }, 400);
+  if (getTenantBySlug(slug)) return c.json({ error: 'slug finnes allerede' }, 409);
+  if (!display_name || !Number.isInteger(max_hr)) {
+    return c.json({ error: 'mangler display_name eller max_hr' }, 400);
+  }
+
+  const t = createTenant({
+    slug,
+    display_name,
+    max_hr,
+    strava_client_id: strava_client_id || null,
+    strava_client_secret: strava_client_secret || null,
+    pin_hash: pin ? hashPin(String(pin)) : null,
+  });
+  return c.json({ tenant: t });
+});
+
+app.delete('/admin/api/tenants/:id', (c) => {
+  const id = Number(c.req.param('id'));
+  if (!getTenantById(id)) return c.json({ error: 'unknown tenant' }, 404);
+  deleteTenant(id);
+  return c.json({ ok: true });
+});
+
+app.post('/admin/api/tenants/:id/sync', async (c) => {
+  const t = getTenantById(Number(c.req.param('id')));
+  if (!t) return c.json({ error: 'unknown tenant' }, 404);
+  if (!getTokensByTenant(t.id)) return c.json({ error: 'not connected' }, 401);
+  return c.json(await runSync(t, { deep: false }));
+});
+
+// ============================================================
+// Strava OAuth — start per tenant, callback global (state = slug:nonce)
+// ============================================================
 
 app.get('/auth/strava/callback', async (c) => {
   const code = c.req.query('code');
+  const state = c.req.query('state') ?? '';
   if (!code) return c.text('Missing code', 400);
+  const slug = state.split(':')[0];
+  const tenant = getTenantBySlug(slug);
+  if (!tenant) return c.text('Ukjent tenant i state', 400);
   try {
-    await exchangeCodeForToken(code);
-    // Send brukeren tilbake til frontend
-    return c.redirect('/?connected=1');
+    const tokens = await exchangeCodeForToken(code, tenant);
+    setTenantAthleteId(tenant.id, tokens.athlete_id);
+    return c.redirect(`/${tenant.slug}?connected=1`);
   } catch (e: any) {
     return c.text(`Auth failed: ${e.message}`, 500);
   }
 });
 
-// --- Status ---
-
-app.get('/api/status', (c) => {
-  const tokens = getTokens();
-  return c.json({ connected: !!tokens, athlete_id: tokens?.athlete_id ?? null });
+app.get('/:slug/auth/strava', (c) => {
+  const tenant = getTenantBySlug(c.req.param('slug'));
+  if (!tenant) return c.text('Ukjent tenant', 404);
+  const state = `${tenant.slug}:${randomBytes(8).toString('hex')}`;
+  return c.redirect(getAuthorizeUrl(tenant, state));
 });
 
-// --- Activities: sync + list ---
+// ============================================================
+// Tenant-API — /:slug/api/* (tenant resolves via middleware)
+// ============================================================
 
-app.post('/api/sync', async (c) => {
-  const tokens = getTokens();
-  if (!tokens) return c.json({ error: 'not connected' }, 401);
-
-  // Inkrementell sync: hent kun nyere enn det vi har
-  const latest = getLatestActivityDate(tokens.athlete_id);
-  const after = latest
-    ? Math.floor(new Date(latest).getTime() / 1000)
-    : Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 90; // siste 90 dager
-
-  let page = 1;
-  let total = 0;
-  while (true) {
-    const batch = await listActivities({ after, page, per_page: 50 });
-    if (batch.length === 0) break;
-    for (const a of batch) saveActivity(tokens.athlete_id, a);
-    total += batch.length;
-    if (batch.length < 50) break;
-    page++;
-    if (page > 20) break; // safety
-  }
-
-  // Fetch detailed data (laps, splits, RPE) for activities missing it
-  const needDetail = getActivitiesWithoutDetail(tokens.athlete_id);
-  let details = 0;
-  for (const actId of needDetail) {
-    try {
-      const detail = await getActivityDetail(actId);
-      saveActivityDetail(actId, detail);
-      details++;
-    } catch {
-      // Strava rate limit or deleted activity – skip, retry next sync
-    }
-  }
-
-  return c.json({ synced: total, details_fetched: details });
+app.use('/:slug/api/*', async (c, next) => {
+  const slug = c.req.param('slug');
+  if (RESERVED.has(slug)) return c.json({ error: 'unknown tenant' }, 404);
+  const tenant = getTenantBySlug(slug);
+  if (!tenant) return c.json({ error: 'unknown tenant' }, 404);
+  c.set('tenant', tenant);
+  await next();
 });
 
-app.post('/api/sync/deep', async (c) => {
-  const tokens = getTokens();
-  if (!tokens) return c.json({ error: 'not connected' }, 401);
-
-  const years = Number(new URL(c.req.url).searchParams.get('years') ?? 5);
-  const detailsOnly = c.req.query('details_only') === '1';
-  const after = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 365 * years;
-
-  let total = 0;
-  if (!detailsOnly) {
-    let page = 1;
-    while (true) {
-      try {
-        const batch = await listActivities({ after, page, per_page: 50 });
-        if (batch.length === 0) break;
-        for (const a of batch) saveActivity(tokens.athlete_id, a);
-        total += batch.length;
-        if (batch.length < 50) break;
-        page++;
-        if (page > 100) break;
-      } catch {
-        break; // rate limited during summary fetch
-      }
-    }
-  }
-
-  // Fetch details — with pacing to stay within rate limits
-  const needDetail = getActivitiesWithoutDetail(tokens.athlete_id);
-  let details = 0;
-  let errors = 0;
-  for (const actId of needDetail) {
-    try {
-      const detail = await getActivityDetail(actId);
-      saveActivityDetail(actId, detail);
-      details++;
-      if (details % 2 === 0) await new Promise((r) => setTimeout(r, 1000));
-    } catch {
-      errors++;
-      if (errors > 3) break;
-    }
-  }
-
+app.get('/:slug/api/status', (c) => {
+  const tenant = c.get('tenant');
   return c.json({
-    synced: total,
-    details_fetched: details,
-    detail_errors: errors,
-    remaining: needDetail.length - details,
+    connected: !!getTokensByTenant(tenant.id),
+    display_name: tenant.display_name,
+    slug: tenant.slug,
+    max_hr: tenant.max_hr,
   });
 });
 
-// --- Claude-eksport: formaterte øktdetaljer klar for copy-paste ---
-
-app.get('/api/export/claude', (c) => {
-  const tokens = getTokens();
-  if (!tokens) return c.json({ error: 'not connected' }, 401);
-
-  const count = Math.min(Math.max(Number(c.req.query('count') ?? 5), 1), 10);
-  const maxHR = Number(c.req.query('max_hr') ?? DEFAULT_MAX_HR);
-  const acts = getLatestActivities(tokens.athlete_id, count);
-
-  const text = formatActivitiesForExport(acts, maxHR);
-  return c.json({ text, count: acts.length, max_hr: maxHR });
+app.post('/:slug/api/sync', async (c) => {
+  const tenant = c.get('tenant');
+  if (!getTokensByTenant(tenant.id)) return c.json({ error: 'not connected' }, 401);
+  const r = await runSync(tenant, { deep: false });
+  return c.json({ synced: r.synced, details_fetched: r.details_fetched });
 });
 
-app.get('/api/activities', (c) => {
-  const tokens = getTokens();
-  if (!tokens) return c.json({ error: 'not connected' }, 401);
+app.post('/:slug/api/sync/deep', async (c) => {
+  const tenant = c.get('tenant');
+  if (!getTokensByTenant(tenant.id)) return c.json({ error: 'not connected' }, 401);
+  const years = Number(c.req.query('years') ?? 5);
+  const detailsOnly = c.req.query('details_only') === '1';
+  return c.json(await runSync(tenant, { deep: true, years, detailsOnly }));
+});
+
+app.get('/:slug/api/activities', (c) => {
+  const tenant = c.get('tenant');
   const weeks = Number(c.req.query('weeks') ?? 8);
-  const since = new Date(
-    Date.now() - weeks * 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const acts = getRecentActivities(tokens.athlete_id, since);
+  const since = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000).toISOString();
+  const acts = getRecentActivities(tenant.id, since);
   return c.json({
     activities: acts.map((a) => ({
       id: a.id,
@@ -168,16 +238,34 @@ app.get('/api/activities', (c) => {
       moving_time_s: a.moving_time,
       avg_hr: a.average_heartrate,
       max_hr: a.max_heartrate,
-      avg_pace_s_per_km:
-        a.average_speed > 0 ? 1000 / a.average_speed : null,
+      avg_pace_s_per_km: a.average_speed > 0 ? 1000 / a.average_speed : null,
     })),
   });
 });
 
-function formatPace(secPerKm: number): string {
-  const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
-  return `${m}:${String(s).padStart(2, '0')}/km`;
+app.get('/:slug/api/export/claude', (c) => {
+  const tenant = c.get('tenant');
+  const count = Math.min(Math.max(Number(c.req.query('count') ?? 5), 1), 10);
+  const acts = getLatestActivities(tenant.id, count);
+  const text = formatActivitiesForExport(acts, tenant);
+  return c.json({ text, count: acts.length, max_hr: tenant.max_hr });
+});
+
+// ============================================================
+// Formatering av eksport-tekst
+// ============================================================
+
+function exportHeader(tenant: Tenant): string {
+  const m = tenant.max_hr;
+  const b70 = Math.round(0.70 * m);
+  const b80 = Math.round(0.80 * m);
+  const b87 = Math.round(0.87 * m);
+  return [
+    `Løper: ${tenant.display_name}. Makspuls: ${m}.`,
+    `Soner (Bakken-modellen, % av makspuls):`,
+    `  Rolig <70% (<${b70}) | Grå 70–80% (${b70}–${b80}, unngås) | Terskel 80–87% (${b80}–${b87}) | Over >87% (>${b87})`,
+    '',
+  ].join('\n');
 }
 
 function formatDuration(seconds: number): string {
@@ -206,22 +294,19 @@ const ZONE_ORDER: { key: 'easy' | 'gray' | 'threshold' | 'above'; label: string 
   { key: 'above', label: 'Over' },
 ];
 
-// Formaterer de siste øktene som en ren tekstblokk klar til å lime inn i Claude.
-function formatActivitiesForExport(acts: any[], maxHR: number): string {
+function formatActivitiesForExport(acts: any[], tenant: Tenant): string {
   if (acts.length === 0) {
     return 'Ingen økter funnet. Synk fra Strava først.';
   }
 
   const blocks: string[] = [];
-  blocks.push(
-    `Treningsøkter (siste ${acts.length}, nyeste først). Soner basert på makspuls ${maxHR}.`,
-  );
+  blocks.push(exportHeader(tenant));
+  blocks.push(`Treningsøkter (siste ${acts.length}, nyeste først):`);
 
   acts.forEach((a, i) => {
     const raw = a.raw_json ? JSON.parse(a.raw_json) : {};
     const detail = a.detail_json ? JSON.parse(a.detail_json) : null;
 
-    // Dato/klokkeslett: bruk lokal tid fra Strava når tilgjengelig
     const localStr: string = raw.start_date_local || a.start_date;
     const datePart = localStr.slice(0, 10);
     const timePart = localStr.slice(11, 16);
@@ -247,7 +332,6 @@ function formatActivitiesForExport(acts: any[], maxHR: number): string {
     lines.push(`Distanse: ${km} km | Totaltid: ${dur} | Snittfart: ${pace}`);
     lines.push(`Snittpuls: ${avgHr} | Makspuls: ${maxHr}`);
 
-    // Tilleggsinfo (kun det som finnes)
     const meta: string[] = [];
     if (detail?.perceived_exertion) meta.push(`RPE: ${detail.perceived_exertion}/10`);
     if (detail?.average_cadence) meta.push(`Kadens: ${Math.round(detail.average_cadence * 2)} spm`);
@@ -258,7 +342,6 @@ function formatActivitiesForExport(acts: any[], maxHR: number): string {
     }
     if (meta.length > 0) lines.push(meta.join(' | '));
 
-    // Runder (laps) med fart og puls
     if (detail?.laps && detail.laps.length > 1) {
       lines.push('');
       lines.push(`Runder (${detail.laps.length}):`);
@@ -274,8 +357,7 @@ function formatActivitiesForExport(acts: any[], maxHR: number): string {
       }
     }
 
-    // Totaltid i hver sone
-    const zones = analyzeActivityZones(a, maxHR);
+    const zones = analyzeActivityZones(a, tenant.max_hr);
     const totalZoneMin = zones.easy + zones.gray + zones.threshold + zones.above;
     lines.push('');
     if (totalZoneMin > 0) {
@@ -294,4 +376,10 @@ function formatActivitiesForExport(acts: any[], maxHR: number): string {
   });
 
   return blocks.join('\n');
+}
+
+function formatPace(secPerKm: number): string {
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}:${String(s).padStart(2, '0')}/km`;
 }

@@ -11,9 +11,16 @@ export default defineConfig({
       name: 'hono-middleware',
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
-          // Bare API-ruter går til Hono. Resten serveres av Vite (React).
+          // Backend-ruter går til Hono. Resten serveres av Vite (React).
+          // Backend: /admin/*, /auth/*, /:slug/api/*, /:slug/auth/*
           const url = req.url || '';
-          if (!url.startsWith('/api') && !url.startsWith('/auth')) {
+          const seg = url.split('?')[0].split('/').filter(Boolean);
+          const isBackend =
+            seg[0] === 'admin' ||
+            seg[0] === 'auth' ||
+            seg[1] === 'api' ||
+            seg[1] === 'auth';
+          if (!isBackend) {
             return next();
           }
           const { app } = await server.ssrLoadModule('/server/index.ts');

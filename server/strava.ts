@@ -1,4 +1,9 @@
-import { saveTokens, getTokens, type StravaTokens } from './db.js';
+import {
+  saveTokensForTenant,
+  getTokensByTenant,
+  type StravaTokens,
+  type Tenant,
+} from './db.js';
 
 const STRAVA_API = 'https://www.strava.com/api/v3';
 const STRAVA_OAUTH = 'https://www.strava.com/oauth/token';
@@ -9,24 +14,33 @@ function env(name: string): string {
   return v;
 }
 
-export function getAuthorizeUrl(): string {
+// Per-tenant Strava credentials, with fallback to global env.
+function clientId(tenant: Tenant): string {
+  return tenant.strava_client_id || env('STRAVA_CLIENT_ID');
+}
+function clientSecret(tenant: Tenant): string {
+  return tenant.strava_client_secret || env('STRAVA_CLIENT_SECRET');
+}
+
+export function getAuthorizeUrl(tenant: Tenant, state: string): string {
   const params = new URLSearchParams({
-    client_id: env('STRAVA_CLIENT_ID'),
+    client_id: clientId(tenant),
     redirect_uri: env('STRAVA_REDIRECT_URI'),
     response_type: 'code',
     approval_prompt: 'auto',
     scope: 'read,activity:read_all',
+    state,
   });
   return `https://www.strava.com/oauth/authorize?${params}`;
 }
 
-export async function exchangeCodeForToken(code: string) {
+export async function exchangeCodeForToken(code: string, tenant: Tenant) {
   const res = await fetch(STRAVA_OAUTH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      client_id: env('STRAVA_CLIENT_ID'),
-      client_secret: env('STRAVA_CLIENT_SECRET'),
+      client_id: clientId(tenant),
+      client_secret: clientSecret(tenant),
       code,
       grant_type: 'authorization_code',
     }),
@@ -39,11 +53,14 @@ export async function exchangeCodeForToken(code: string) {
     refresh_token: data.refresh_token,
     expires_at: data.expires_at,
   };
-  saveTokens(tokens);
+  saveTokensForTenant(tenant.id, tokens);
   return tokens;
 }
 
-async function refreshIfNeeded(tokens: StravaTokens): Promise<StravaTokens> {
+async function refreshIfNeeded(
+  tenant: Tenant,
+  tokens: StravaTokens,
+): Promise<StravaTokens> {
   const now = Math.floor(Date.now() / 1000);
   if (tokens.expires_at > now + 60) return tokens;
 
@@ -51,8 +68,8 @@ async function refreshIfNeeded(tokens: StravaTokens): Promise<StravaTokens> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      client_id: env('STRAVA_CLIENT_ID'),
-      client_secret: env('STRAVA_CLIENT_SECRET'),
+      client_id: clientId(tenant),
+      client_secret: clientSecret(tenant),
       grant_type: 'refresh_token',
       refresh_token: tokens.refresh_token,
     }),
@@ -65,14 +82,18 @@ async function refreshIfNeeded(tokens: StravaTokens): Promise<StravaTokens> {
     refresh_token: data.refresh_token,
     expires_at: data.expires_at,
   };
-  saveTokens(updated);
+  saveTokensForTenant(tenant.id, updated);
   return updated;
 }
 
-async function authedFetch(path: string, params?: Record<string, string>) {
-  const tokens = getTokens();
+async function authedFetch(
+  tenant: Tenant,
+  path: string,
+  params?: Record<string, string>,
+) {
+  const tokens = getTokensByTenant(tenant.id);
   if (!tokens) throw new Error('Not authenticated with Strava');
-  const fresh = await refreshIfNeeded(tokens);
+  const fresh = await refreshIfNeeded(tenant, tokens);
 
   const url = new URL(`${STRAVA_API}${path}`);
   if (params) {
@@ -88,19 +109,18 @@ async function authedFetch(path: string, params?: Record<string, string>) {
   return res.json();
 }
 
-export async function listActivities(opts: {
-  after?: number; // unix timestamp
-  page?: number;
-  per_page?: number;
-}) {
+export async function listActivities(
+  tenant: Tenant,
+  opts: { after?: number; page?: number; per_page?: number },
+) {
   const params: Record<string, string> = {
     per_page: String(opts.per_page ?? 50),
     page: String(opts.page ?? 1),
   };
   if (opts.after) params.after = String(opts.after);
-  return authedFetch('/athlete/activities', params) as Promise<any[]>;
+  return authedFetch(tenant, '/athlete/activities', params) as Promise<any[]>;
 }
 
-export async function getActivityDetail(id: number) {
-  return authedFetch(`/activities/${id}`);
+export async function getActivityDetail(tenant: Tenant, id: number) {
+  return authedFetch(tenant, `/activities/${id}`);
 }
