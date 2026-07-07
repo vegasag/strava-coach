@@ -8,8 +8,20 @@ const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../data.db');
 export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
-// Schema. Holder det enkelt – vi har én bruker (deg).
+// Schema.
 db.exec(`
+  CREATE TABLE IF NOT EXISTS tenants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT UNIQUE NOT NULL,
+    display_name TEXT NOT NULL,
+    max_hr INTEGER NOT NULL,
+    athlete_id INTEGER UNIQUE,
+    pin_hash TEXT,
+    strava_client_id TEXT,
+    strava_client_secret TEXT,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS strava_tokens (
     athlete_id INTEGER PRIMARY KEY,
     access_token TEXT NOT NULL,
@@ -46,12 +58,97 @@ try {
   // column already exists
 }
 
+// Migration: multi-tenant columns (additive; existing single-user data stays valid)
+try {
+  db.exec(`ALTER TABLE activities ADD COLUMN tenant_id INTEGER`);
+} catch {
+  // column already exists
+}
+try {
+  db.exec(`ALTER TABLE strava_tokens ADD COLUMN tenant_id INTEGER`);
+} catch {
+  // column already exists
+}
+db.exec(
+  `CREATE INDEX IF NOT EXISTS idx_activities_tenant
+   ON activities(tenant_id, start_date DESC)`,
+);
+
 export type StravaTokens = {
   athlete_id: number;
   access_token: string;
   refresh_token: string;
   expires_at: number;
 };
+
+export type Tenant = {
+  id: number;
+  slug: string;
+  display_name: string;
+  max_hr: number;
+  athlete_id: number | null;
+  pin_hash: string | null;
+  strava_client_id: string | null;
+  strava_client_secret: string | null;
+  created_at: number;
+};
+
+export function createTenant(t: {
+  slug: string;
+  display_name: string;
+  max_hr: number;
+  strava_client_id?: string | null;
+  strava_client_secret?: string | null;
+  pin_hash?: string | null;
+}): Tenant {
+  const info = db
+    .prepare(
+      `INSERT INTO tenants
+       (slug, display_name, max_hr, strava_client_id, strava_client_secret, pin_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      t.slug,
+      t.display_name,
+      t.max_hr,
+      t.strava_client_id ?? null,
+      t.strava_client_secret ?? null,
+      t.pin_hash ?? null,
+      Date.now(),
+    );
+  return getTenantById(Number(info.lastInsertRowid))!;
+}
+
+export function getTenantById(id: number): Tenant | undefined {
+  return db.prepare('SELECT * FROM tenants WHERE id = ?').get(id) as
+    | Tenant
+    | undefined;
+}
+
+export function getTenantBySlug(slug: string): Tenant | undefined {
+  return db.prepare('SELECT * FROM tenants WHERE slug = ?').get(slug) as
+    | Tenant
+    | undefined;
+}
+
+export function getTenantByAthleteId(athleteId: number): Tenant | undefined {
+  return db
+    .prepare('SELECT * FROM tenants WHERE athlete_id = ?')
+    .get(athleteId) as Tenant | undefined;
+}
+
+export function listTenants(): Tenant[] {
+  return db
+    .prepare('SELECT * FROM tenants ORDER BY created_at ASC')
+    .all() as Tenant[];
+}
+
+export function setTenantAthleteId(tenantId: number, athleteId: number) {
+  db.prepare('UPDATE tenants SET athlete_id = ? WHERE id = ?').run(
+    athleteId,
+    tenantId,
+  );
+}
 
 export function saveTokens(t: StravaTokens) {
   db.prepare(
@@ -158,3 +255,35 @@ export function getLatestActivityDate(athleteId: number): string | undefined {
     .get(athleteId) as { start_date: string } | undefined;
   return row?.start_date;
 }
+
+// One-time migration: turn the existing single-user DB into tenant "vegard".
+// Idempotent — runs only when no tenants exist yet AND there is existing data.
+function migrateToMultiTenant() {
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM tenants').get() as {
+    n: number;
+  };
+  if (n > 0) return;
+
+  const tok = db.prepare('SELECT * FROM strava_tokens LIMIT 1').get() as
+    | StravaTokens
+    | undefined;
+  if (!tok) return; // fresh DB — nothing to migrate
+
+  const tenant = createTenant({
+    slug: 'vegard',
+    display_name: 'Vegard',
+    max_hr: 200,
+    strava_client_id: process.env.STRAVA_CLIENT_ID ?? null,
+    strava_client_secret: process.env.STRAVA_CLIENT_SECRET ?? null,
+  });
+  setTenantAthleteId(tenant.id, tok.athlete_id);
+  db.prepare('UPDATE activities SET tenant_id = ? WHERE tenant_id IS NULL').run(
+    tenant.id,
+  );
+  db.prepare('UPDATE strava_tokens SET tenant_id = ? WHERE athlete_id = ?').run(
+    tenant.id,
+    tok.athlete_id,
+  );
+}
+
+migrateToMultiTenant();
