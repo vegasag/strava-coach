@@ -1,0 +1,226 @@
+import { useEffect, useState } from 'react';
+
+type TenantRow = {
+  id: number;
+  slug: string;
+  display_name: string;
+  max_hr: number;
+  connected: boolean;
+  activity_count: number;
+  last_activity: string | null;
+  has_own_creds: boolean;
+  has_pin: boolean;
+};
+
+export function Admin() {
+  const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  async function load() {
+    const r = await fetch('/admin/api/tenants');
+    const d = await r.json();
+    setTenants(d.tenants ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function syncTenant(id: number) {
+    setBusyId(id);
+    try {
+      await fetch(`/admin/api/tenants/${id}/sync`, { method: 'POST' });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteTenant(id: number, name: string) {
+    if (!confirm(`Slette ${name} og alle øktene? Kan ikke angres.`)) return;
+    setBusyId(id);
+    try {
+      await fetch(`/admin/api/tenants/${id}`, { method: 'DELETE' });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loading) return <div className="container">Laster…</div>;
+
+  return (
+    <div className="container">
+      <header>
+        <h1>Strava Coach – oversikt</h1>
+        <button className="btn primary" onClick={() => setShowForm((v) => !v)}>
+          {showForm ? 'Lukk' : 'Legg til'}
+        </button>
+      </header>
+
+      {showForm && (
+        <AddTenantForm
+          onCreated={() => {
+            setShowForm(false);
+            load();
+          }}
+        />
+      )}
+
+      <ul className="tenant-list">
+        {tenants.map((t) => (
+          <li key={t.id} className="tenant-card">
+            <div className="tenant-main">
+              <a className="tenant-name" href={`/${t.slug}`}>
+                {t.display_name}
+              </a>
+              <span className="tenant-slug">/{t.slug}</span>
+            </div>
+            <div className="tenant-meta">
+              <span className={t.connected ? 'badge ok' : 'badge off'}>
+                {t.connected ? 'Tilkoblet' : 'Ikke tilkoblet'}
+              </span>
+              <span>Maks {t.max_hr}</span>
+              <span>{t.activity_count} økter</span>
+              {t.last_activity && (
+                <span>Sist: {t.last_activity.slice(0, 10)}</span>
+              )}
+            </div>
+            <div className="tenant-actions">
+              {t.connected ? (
+                <button
+                  className="btn"
+                  onClick={() => syncTenant(t.id)}
+                  disabled={busyId === t.id}
+                >
+                  {busyId === t.id ? 'Synker…' : 'Synk'}
+                </button>
+              ) : (
+                <a className="btn" href={`/${t.slug}/auth/strava`}>
+                  Koble til Strava
+                </a>
+              )}
+              <a className="btn" href={`/${t.slug}`}>
+                Åpne
+              </a>
+              <button
+                className="btn danger"
+                onClick={() => deleteTenant(t.id, t.display_name)}
+                disabled={busyId === t.id}
+              >
+                Slett
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function AddTenantForm({ onCreated }: { onCreated: () => void }) {
+  const [slug, setSlug] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [maxHr, setMaxHr] = useState('195');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      const r = await fetch('/admin/api/tenants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug: slug.trim(),
+          display_name: displayName.trim(),
+          max_hr: Number(maxHr),
+          strava_client_id: clientId.trim() || null,
+          strava_client_secret: clientSecret.trim() || null,
+          pin: pin.trim() || null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setError(d.error ?? 'Kunne ikke opprette');
+        return;
+      }
+      onCreated();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="add-form" onSubmit={submit}>
+      <label>
+        Navn
+        <input
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="Kristian"
+          required
+        />
+      </label>
+      <label>
+        Lenke (slug)
+        <input
+          value={slug}
+          onChange={(e) => setSlug(e.target.value.toLowerCase())}
+          placeholder="kristian"
+          pattern="[a-z][a-z0-9-]{1,30}"
+          required
+        />
+      </label>
+      <label>
+        Makspuls
+        <input
+          type="number"
+          inputMode="numeric"
+          value={maxHr}
+          onChange={(e) => setMaxHr(e.target.value)}
+          required
+        />
+      </label>
+      <label>
+        PIN (valgfri)
+        <input
+          inputMode="numeric"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          placeholder="4 siffer"
+        />
+      </label>
+      <details className="add-form-advanced">
+        <summary>Egne Strava-nøkler (valgfritt)</summary>
+        <p className="hint">
+          Lag på strava.com/settings/api (callback-domene:
+          strava-coach.fly.dev). La stå tomt for å bruke felles nøkler.
+        </p>
+        <label>
+          Client ID
+          <input value={clientId} onChange={(e) => setClientId(e.target.value)} />
+        </label>
+        <label>
+          Client Secret
+          <input
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+          />
+        </label>
+      </details>
+      {error && <p className="form-error">{error}</p>}
+      <button className="btn primary" type="submit" disabled={saving}>
+        {saving ? 'Lagrer…' : 'Opprett'}
+      </button>
+    </form>
+  );
+}

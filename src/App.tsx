@@ -12,8 +12,13 @@ type Activity = {
   avg_pace_s_per_km: number | null;
 };
 
-export function App() {
-  const [connected, setConnected] = useState<boolean | null>(null);
+type Status =
+  | { state: 'loading' }
+  | { state: 'unknown' }
+  | { state: 'ready'; connected: boolean; display_name: string };
+
+export function TenantApp({ slug }: { slug: string }) {
+  const [status, setStatus] = useState<Status>({ state: 'loading' });
   const [activities, setActivities] = useState<Activity[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [exportCount, setExportCount] = useState(5);
@@ -21,18 +26,27 @@ export function App() {
   const [exportLoading, setExportLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    fetch('/api/status')
-      .then((r) => r.json())
-      .then((d) => setConnected(d.connected));
-  }, []);
+  const api = (path: string) => `/${slug}${path}`;
 
   useEffect(() => {
-    if (connected) loadActivities();
-  }, [connected]);
+    fetch(api('/api/status'))
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) =>
+        setStatus({
+          state: 'ready',
+          connected: d.connected,
+          display_name: d.display_name,
+        }),
+      )
+      .catch(() => setStatus({ state: 'unknown' }));
+  }, [slug]);
+
+  useEffect(() => {
+    if (status.state === 'ready' && status.connected) loadActivities();
+  }, [status]);
 
   async function loadActivities() {
-    const r = await fetch('/api/activities?weeks=8');
+    const r = await fetch(api('/api/activities?weeks=8'));
     const d = await r.json();
     setActivities(d.activities ?? []);
   }
@@ -41,7 +55,7 @@ export function App() {
     setExportLoading(true);
     setCopied(false);
     try {
-      const r = await fetch(`/api/export/claude?count=${exportCount}`);
+      const r = await fetch(api(`/api/export/claude?count=${exportCount}`));
       const d = await r.json();
       setExportText(d.text ?? d.error ?? '');
     } catch (e: any) {
@@ -64,21 +78,35 @@ export function App() {
   async function sync() {
     setSyncing(true);
     try {
-      await fetch('/api/sync', { method: 'POST' });
+      await fetch(api('/api/sync'), { method: 'POST' });
       await loadActivities();
     } finally {
       setSyncing(false);
     }
   }
 
-  if (connected === null) return <div className="container">Laster…</div>;
+  if (status.state === 'loading') {
+    return <div className="container">Laster…</div>;
+  }
 
-  if (!connected) {
+  if (status.state === 'unknown') {
     return (
       <div className="container">
         <h1>Strava Coach</h1>
+        <p>Fant ingen bruker «{slug}».</p>
+        <a className="btn" href="/">
+          Til oversikten
+        </a>
+      </div>
+    );
+  }
+
+  if (!status.connected) {
+    return (
+      <div className="container">
+        <h1>{status.display_name}</h1>
         <p>Koble til Strava for å starte.</p>
-        <a className="btn primary" href="/auth/strava">
+        <a className="btn primary" href={`/${slug}/auth/strava`}>
           Koble til Strava
         </a>
       </div>
@@ -88,7 +116,7 @@ export function App() {
   return (
     <div className="container">
       <header>
-        <h1>Strava Coach</h1>
+        <h1>{status.display_name}</h1>
         <button className="btn" onClick={sync} disabled={syncing}>
           {syncing ? 'Synkroniserer…' : 'Hent nye økter'}
         </button>

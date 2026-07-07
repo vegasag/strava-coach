@@ -109,3 +109,85 @@ h2 { font-size: 1.1rem; margin: 24px 0 8px; }
 @media (prefers-color-scheme: dark) {
   .export-text { background: #1a1a1a; border-color: #333; }
 }
+
+/* --- Admin --- */
+.tenant-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tenant-card {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  .tenant-card { border-color: #333; }
+}
+.tenant-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tenant-name { font-size: 1.1rem; font-weight: 600; text-decoration: none; color: inherit; }
+.tenant-slug { font-size: 0.85rem; opacity: 0.6; }
+.tenant-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.8rem;
+  opacity: 0.85;
+  margin: 8px 0 12px;
+}
+.badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.badge.ok { background: #e8f5e9; color: #2e7d32; }
+.badge.off { background: #fdecea; color: #c62828; }
+@media (prefers-color-scheme: dark) {
+  .badge.ok { background: #1b3a1b; color: #81c784; }
+  .badge.off { background: #3a1b1b; color: #ef9a9a; }
+}
+.tenant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn.danger { border-color: #e53935; color: #e53935; }
+.add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  .add-form { border-color: #333; }
+}
+.add-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.add-form input {
+  padding: 10px;
+  font: inherit;
+  border: 1px solid #888;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.add-form-advanced { font-size: 0.85rem; }
+.add-form-advanced summary { cursor: pointer; padding: 4px 0; }
+.add-form-advanced .hint { font-size: 0.8rem; opacity: 0.7; margin: 4px 0; }
+.form-error { color: #c62828; font-size: 0.85rem; margin: 0; }
