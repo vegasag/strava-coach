@@ -15,19 +15,28 @@ type TenantRow = {
 export function Admin() {
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [needLogin, setNeedLogin] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   async function load() {
     const r = await fetch('/admin/api/tenants');
+    if (r.status === 401) {
+      setNeedLogin(true);
+      setLoading(false);
+      return;
+    }
     const d = await r.json();
     setTenants(d.tenants ?? []);
+    setNeedLogin(false);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, []);
+
+  if (needLogin) return <AdminLogin onSuccess={load} />;
 
   async function syncTenant(id: number) {
     setBusyId(id);
@@ -117,6 +126,53 @@ export function Admin() {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const r = await fetch('/admin/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (!r.ok) {
+        setError('Feil passord');
+        return;
+      }
+      onSuccess();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="container">
+      <h1>Admin</h1>
+      <form className="add-form" onSubmit={submit}>
+        <label>
+          Passord
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoFocus
+          />
+        </label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="btn primary" type="submit" disabled={busy}>
+          {busy ? 'Logger inn…' : 'Logg inn'}
+        </button>
+      </form>
     </div>
   );
 }

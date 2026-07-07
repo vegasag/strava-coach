@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { createHmac, randomBytes } from 'crypto';
+import { getCookie, setCookie } from 'hono/cookie';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import {
   getAuthorizeUrl,
   exchangeCodeForToken,
@@ -33,10 +34,52 @@ const RESERVED = new Set([
   'api', 'auth', 'admin', 'assets', 'favicon.ico', 'robots.txt',
 ]);
 
+const SESSION_SECRET = process.env.SESSION_SECRET ?? 'dev-secret';
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 år
+const PROD = process.env.NODE_ENV === 'production';
+
 function hashPin(pin: string): string {
-  return createHmac('sha256', process.env.SESSION_SECRET ?? 'dev-secret')
-    .update(pin)
-    .digest('hex');
+  return createHmac('sha256', SESSION_SECRET).update(pin).digest('hex');
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+// Signerte cookies: verdi.hmac(verdi). Ingen server-side sesjonslager nødvendig.
+function signValue(value: string): string {
+  const sig = createHmac('sha256', SESSION_SECRET).update(value).digest('hex');
+  return `${value}.${sig}`;
+}
+function verifySigned(signed: string | undefined, expected: string): boolean {
+  if (!signed) return false;
+  const i = signed.lastIndexOf('.');
+  if (i < 0) return false;
+  const value = signed.slice(0, i);
+  return value === expected && safeEqual(signed, signValue(expected));
+}
+
+function setAuthCookie(c: any, name: string, value: string) {
+  setCookie(c, name, signValue(value), {
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: PROD,
+    path: '/',
+    maxAge: COOKIE_MAX_AGE,
+  });
+}
+
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? '';
+
+function isAdmin(c: any): boolean {
+  return verifySigned(getCookie(c, 'admin'), 'admin');
+}
+
+function pinAuthed(c: any, tenant: Tenant): boolean {
+  if (!tenant.pin_hash) return true;
+  return verifySigned(getCookie(c, `pin_${tenant.slug}`), `pin:${tenant.slug}`);
 }
 
 // Delt sync-logikk for både tenant-endepunkt og admin-trigget sync.
@@ -101,8 +144,25 @@ async function runSync(
 }
 
 // ============================================================
-// Admin (global) — auth legges på i steg 5
+// Admin (global) — beskyttet av ADMIN_PASSWORD (åpen hvis ikke satt, f.eks. dev)
 // ============================================================
+
+app.post('/admin/api/login', async (c) => {
+  const { password } = await c.req.json().catch(() => ({}));
+  if (ADMIN_PASSWORD && (!password || !safeEqual(String(password), ADMIN_PASSWORD))) {
+    return c.json({ error: 'feil passord' }, 401);
+  }
+  setAuthCookie(c, 'admin', 'admin');
+  return c.json({ ok: true });
+});
+
+app.use('/admin/api/*', async (c, next) => {
+  if (c.req.path === '/admin/api/login') return next();
+  if (ADMIN_PASSWORD && !isAdmin(c)) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  await next();
+});
 
 app.get('/admin/api/tenants', (c) => {
   const tenants = listTenants().map((t) => ({
@@ -195,7 +255,23 @@ app.use('/:slug/api/*', async (c, next) => {
   const tenant = getTenantBySlug(slug);
   if (!tenant) return c.json({ error: 'unknown tenant' }, 404);
   c.set('tenant', tenant);
+  // status + login er åpne; resten krever PIN hvis tenant har satt en.
+  const open =
+    c.req.path === `/${slug}/api/status` || c.req.path === `/${slug}/api/login`;
+  if (!open && !pinAuthed(c, tenant)) {
+    return c.json({ error: 'pin required' }, 401);
+  }
   await next();
+});
+
+app.post('/:slug/api/login', async (c) => {
+  const tenant = c.get('tenant');
+  const { pin } = await c.req.json().catch(() => ({}));
+  if (tenant.pin_hash && (!pin || !safeEqual(hashPin(String(pin)), tenant.pin_hash))) {
+    return c.json({ error: 'feil pin' }, 401);
+  }
+  setAuthCookie(c, `pin_${tenant.slug}`, `pin:${tenant.slug}`);
+  return c.json({ ok: true });
 });
 
 app.get('/:slug/api/status', (c) => {
@@ -205,6 +281,8 @@ app.get('/:slug/api/status', (c) => {
     display_name: tenant.display_name,
     slug: tenant.slug,
     max_hr: tenant.max_hr,
+    pin_required: !!tenant.pin_hash,
+    authed: pinAuthed(c, tenant),
   });
 });
 

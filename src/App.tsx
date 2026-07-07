@@ -15,7 +15,13 @@ type Activity = {
 type Status =
   | { state: 'loading' }
   | { state: 'unknown' }
-  | { state: 'ready'; connected: boolean; display_name: string };
+  | {
+      state: 'ready';
+      connected: boolean;
+      display_name: string;
+      pin_required: boolean;
+      authed: boolean;
+    };
 
 export function TenantApp({ slug }: { slug: string }) {
   const [status, setStatus] = useState<Status>({ state: 'loading' });
@@ -28,7 +34,7 @@ export function TenantApp({ slug }: { slug: string }) {
 
   const api = (path: string) => `/${slug}${path}`;
 
-  useEffect(() => {
+  function loadStatus() {
     fetch(api('/api/status'))
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((d) =>
@@ -36,13 +42,25 @@ export function TenantApp({ slug }: { slug: string }) {
           state: 'ready',
           connected: d.connected,
           display_name: d.display_name,
+          pin_required: d.pin_required,
+          authed: d.authed,
         }),
       )
       .catch(() => setStatus({ state: 'unknown' }));
+  }
+
+  useEffect(() => {
+    loadStatus();
   }, [slug]);
 
   useEffect(() => {
-    if (status.state === 'ready' && status.connected) loadActivities();
+    if (
+      status.state === 'ready' &&
+      status.connected &&
+      (!status.pin_required || status.authed)
+    ) {
+      loadActivities();
+    }
   }, [status]);
 
   async function loadActivities() {
@@ -98,6 +116,16 @@ export function TenantApp({ slug }: { slug: string }) {
           Til oversikten
         </a>
       </div>
+    );
+  }
+
+  if (status.pin_required && !status.authed) {
+    return (
+      <PinScreen
+        slug={slug}
+        name={status.display_name}
+        onSuccess={loadStatus}
+      />
     );
   }
 
@@ -181,6 +209,64 @@ export function TenantApp({ slug }: { slug: string }) {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function PinScreen({
+  slug,
+  name,
+  onSuccess,
+}: {
+  slug: string;
+  name: string;
+  onSuccess: () => void;
+}) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(value: string) {
+    setBusy(true);
+    setError(false);
+    try {
+      const r = await fetch(`/${slug}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: value }),
+      });
+      if (!r.ok) {
+        setError(true);
+        setPin('');
+        return;
+      }
+      onSuccess();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onChange(v: string) {
+    const digits = v.replace(/\D/g, '').slice(0, 4);
+    setPin(digits);
+    if (digits.length === 4) submit(digits); // auto-submit ved 4 siffer
+  }
+
+  return (
+    <div className="container pin-screen">
+      <h1>{name}</h1>
+      <p>Skriv inn PIN-koden.</p>
+      <input
+        className="pin-input"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        autoFocus
+        value={pin}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="••••"
+      />
+      {error && <p className="form-error">Feil PIN. Prøv igjen.</p>}
     </div>
   );
 }

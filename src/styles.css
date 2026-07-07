@@ -191,3 +191,18 @@ h2 { font-size: 1.1rem; margin: 24px 0 8px; }
 .add-form-advanced summary { cursor: pointer; padding: 4px 0; }
 .add-form-advanced .hint { font-size: 0.8rem; opacity: 0.7; margin: 4px 0; }
 .form-error { color: #c62828; font-size: 0.85rem; margin: 0; }
+.pin-screen { text-align: center; }
+.pin-input {
+  width: 100%;
+  max-width: 240px;
+  box-sizing: border-box;
+  padding: 16px;
+  margin: 12px auto 0;
+  font-size: 2rem;
+  letter-spacing: 0.5em;
+  text-align: center;
+  border: 1px solid #888;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+}
