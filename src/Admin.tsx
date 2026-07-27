@@ -9,7 +9,6 @@ type TenantRow = {
   activity_count: number;
   last_activity: string | null;
   has_own_creds: boolean;
-  has_pin: boolean;
 };
 
 export function Admin() {
@@ -183,7 +182,6 @@ function AddTenantForm({ onCreated }: { onCreated: () => void }) {
   const [maxHr, setMaxHr] = useState('195');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
-  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -201,7 +199,6 @@ function AddTenantForm({ onCreated }: { onCreated: () => void }) {
           max_hr: Number(maxHr),
           strava_client_id: clientId.trim() || null,
           strava_client_secret: clientSecret.trim() || null,
-          pin: pin.trim() || null,
         }),
       });
       const d = await r.json();
@@ -244,15 +241,6 @@ function AddTenantForm({ onCreated }: { onCreated: () => void }) {
           value={maxHr}
           onChange={(e) => setMaxHr(e.target.value)}
           required
-        />
-      </label>
-      <label>
-        PIN (valgfri)
-        <input
-          inputMode="numeric"
-          value={pin}
-          onChange={(e) => setPin(e.target.value)}
-          placeholder="4 siffer"
         />
       </label>
       <details className="add-form-advanced">

@@ -16,7 +16,6 @@ db.exec(`
     display_name TEXT NOT NULL,
     max_hr INTEGER NOT NULL,
     athlete_id INTEGER UNIQUE,
-    pin_hash TEXT,
     strava_client_id TEXT,
     strava_client_secret TEXT,
     created_at INTEGER NOT NULL
@@ -87,7 +86,6 @@ export type Tenant = {
   display_name: string;
   max_hr: number;
   athlete_id: number | null;
-  pin_hash: string | null;
   strava_client_id: string | null;
   strava_client_secret: string | null;
   created_at: number;
@@ -99,13 +97,12 @@ export function createTenant(t: {
   max_hr: number;
   strava_client_id?: string | null;
   strava_client_secret?: string | null;
-  pin_hash?: string | null;
 }): Tenant {
   const info = db
     .prepare(
       `INSERT INTO tenants
-       (slug, display_name, max_hr, strava_client_id, strava_client_secret, pin_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (slug, display_name, max_hr, strava_client_id, strava_client_secret, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       t.slug,
@@ -113,7 +110,6 @@ export function createTenant(t: {
       t.max_hr,
       t.strava_client_id ?? null,
       t.strava_client_secret ?? null,
-      t.pin_hash ?? null,
       Date.now(),
     );
   return getTenantById(Number(info.lastInsertRowid))!;

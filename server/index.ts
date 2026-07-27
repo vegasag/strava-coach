@@ -38,10 +38,6 @@ const SESSION_SECRET = process.env.SESSION_SECRET ?? 'dev-secret';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 år
 const PROD = process.env.NODE_ENV === 'production';
 
-function hashPin(pin: string): string {
-  return createHmac('sha256', SESSION_SECRET).update(pin).digest('hex');
-}
-
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -77,10 +73,6 @@ function isAdmin(c: any): boolean {
   return verifySigned(getCookie(c, 'admin'), 'admin');
 }
 
-function pinAuthed(c: any, tenant: Tenant): boolean {
-  if (!tenant.pin_hash) return true;
-  return verifySigned(getCookie(c, `pin_${tenant.slug}`), `pin:${tenant.slug}`);
-}
 
 // Delt sync-logikk for både tenant-endepunkt og admin-trigget sync.
 async function runSync(
@@ -175,14 +167,13 @@ app.get('/admin/api/tenants', (c) => {
     activity_count: countActivities(t.id),
     last_activity: getLatestActivityDate(t.id) ?? null,
     has_own_creds: !!t.strava_client_id,
-    has_pin: !!t.pin_hash,
   }));
   return c.json({ tenants });
 });
 
 app.post('/admin/api/tenants', async (c) => {
   const body = await c.req.json();
-  const { slug, display_name, max_hr, strava_client_id, strava_client_secret, pin } = body;
+  const { slug, display_name, max_hr, strava_client_id, strava_client_secret } = body;
 
   if (!/^[a-z][a-z0-9-]{1,30}$/.test(slug ?? '')) {
     return c.json({ error: 'ugyldig slug (a-z, tall, bindestrek)' }, 400);
@@ -199,7 +190,6 @@ app.post('/admin/api/tenants', async (c) => {
     max_hr,
     strava_client_id: strava_client_id || null,
     strava_client_secret: strava_client_secret || null,
-    pin_hash: pin ? hashPin(String(pin)) : null,
   });
   return c.json({ tenant: t });
 });
@@ -255,23 +245,7 @@ app.use('/:slug/api/*', async (c, next) => {
   const tenant = getTenantBySlug(slug);
   if (!tenant) return c.json({ error: 'unknown tenant' }, 404);
   c.set('tenant', tenant);
-  // status + login er åpne; resten krever PIN hvis tenant har satt en.
-  const open =
-    c.req.path === `/${slug}/api/status` || c.req.path === `/${slug}/api/login`;
-  if (!open && !pinAuthed(c, tenant)) {
-    return c.json({ error: 'pin required' }, 401);
-  }
   await next();
-});
-
-app.post('/:slug/api/login', async (c) => {
-  const tenant = c.get('tenant');
-  const { pin } = await c.req.json().catch(() => ({}));
-  if (tenant.pin_hash && (!pin || !safeEqual(hashPin(String(pin)), tenant.pin_hash))) {
-    return c.json({ error: 'feil pin' }, 401);
-  }
-  setAuthCookie(c, `pin_${tenant.slug}`, `pin:${tenant.slug}`);
-  return c.json({ ok: true });
 });
 
 app.get('/:slug/api/status', (c) => {
@@ -281,8 +255,6 @@ app.get('/:slug/api/status', (c) => {
     display_name: tenant.display_name,
     slug: tenant.slug,
     max_hr: tenant.max_hr,
-    pin_required: !!tenant.pin_hash,
-    authed: pinAuthed(c, tenant),
   });
 });
 
