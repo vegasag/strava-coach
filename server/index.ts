@@ -23,6 +23,7 @@ import {
   setTenantAthleteId,
   countActivities,
   deleteTenant,
+  updateTenant,
   type Tenant,
 } from './db.js';
 import { analyzeActivityZones } from './analysis.js';
@@ -213,6 +214,7 @@ app.get('/admin/api/tenants', (c) => {
     activity_count: countActivities(t.id),
     last_activity: getLatestActivityDate(t.id) ?? null,
     has_own_creds: !!t.strava_client_id,
+    show_gear: !!t.show_gear,
   }));
   return c.json({ tenants });
 });
@@ -238,6 +240,20 @@ app.post('/admin/api/tenants', async (c) => {
     strava_client_secret: strava_client_secret || null,
   });
   return c.json({ tenant: t });
+});
+
+app.patch('/admin/api/tenants/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!getTenantById(id)) return c.json({ error: 'unknown tenant' }, 404);
+  const body = await c.req.json().catch(() => ({}));
+  const fields: { show_gear?: boolean; max_hr?: number; display_name?: string } = {};
+  if (typeof body.show_gear === 'boolean') fields.show_gear = body.show_gear;
+  if (Number.isInteger(body.max_hr)) fields.max_hr = body.max_hr;
+  if (typeof body.display_name === 'string' && body.display_name.trim()) {
+    fields.display_name = body.display_name.trim();
+  }
+  updateTenant(id, fields);
+  return c.json({ tenant: getTenantById(id) });
 });
 
 app.delete('/admin/api/tenants/:id', (c) => {
@@ -493,7 +509,7 @@ function formatActivitiesForExport(acts: any[], tenant: Tenant): string {
     }
     if (meta.length > 0) lines.push(meta.join(' | '));
 
-    if (detail?.gear?.name) lines.push(`Sko: ${detail.gear.name}`);
+    if (tenant.show_gear && detail?.gear?.name) lines.push(`Sko: ${detail.gear.name}`);
 
     const hasLaps = detail?.laps && detail.laps.length > 1;
 

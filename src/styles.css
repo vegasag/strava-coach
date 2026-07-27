@@ -154,6 +154,15 @@ h2 { font-size: 1.1rem; margin: 24px 0 8px; }
   .badge.ok { background: #1b3a1b; color: #81c784; }
   .badge.off { background: #3a1b1b; color: #ef9a9a; }
 }
+.tenant-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.tenant-toggle input { width: 18px; height: 18px; }
 .tenant-actions {
   display: flex;
   flex-wrap: wrap;

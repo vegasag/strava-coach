@@ -9,6 +9,7 @@ type TenantRow = {
   activity_count: number;
   last_activity: string | null;
   has_own_creds: boolean;
+  show_gear: boolean;
 };
 
 export function Admin() {
@@ -45,6 +46,17 @@ export function Admin() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function toggleGear(id: number, value: boolean) {
+    setTenants((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, show_gear: value } : t)),
+    );
+    await fetch(`/admin/api/tenants/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ show_gear: value }),
+    });
   }
 
   async function deleteTenant(id: number, name: string) {
@@ -97,6 +109,14 @@ export function Admin() {
                 <span>Sist: {t.last_activity.slice(0, 10)}</span>
               )}
             </div>
+            <label className="tenant-toggle">
+              <input
+                type="checkbox"
+                checked={t.show_gear}
+                onChange={(e) => toggleGear(t.id, e.target.checked)}
+              />
+              Ta med sko i eksporten
+            </label>
             <div className="tenant-actions">
               {t.connected ? (
                 <button

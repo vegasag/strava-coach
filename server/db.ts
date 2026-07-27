@@ -18,6 +18,7 @@ db.exec(`
     athlete_id INTEGER UNIQUE,
     strava_client_id TEXT,
     strava_client_secret TEXT,
+    show_gear INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
 
@@ -68,6 +69,11 @@ try {
 } catch {
   // column already exists
 }
+try {
+  db.exec(`ALTER TABLE tenants ADD COLUMN show_gear INTEGER NOT NULL DEFAULT 0`);
+} catch {
+  // column already exists
+}
 db.exec(
   `CREATE INDEX IF NOT EXISTS idx_activities_tenant
    ON activities(tenant_id, start_date DESC)`,
@@ -88,8 +94,31 @@ export type Tenant = {
   athlete_id: number | null;
   strava_client_id: string | null;
   strava_client_secret: string | null;
+  show_gear: number;
   created_at: number;
 };
+
+export function updateTenant(
+  id: number,
+  fields: { show_gear?: boolean; max_hr?: number; display_name?: string },
+) {
+  const sets: string[] = [];
+  const vals: any[] = [];
+  if (fields.show_gear !== undefined) {
+    sets.push('show_gear = ?');
+    vals.push(fields.show_gear ? 1 : 0);
+  }
+  if (fields.max_hr !== undefined) {
+    sets.push('max_hr = ?');
+    vals.push(fields.max_hr);
+  }
+  if (fields.display_name !== undefined) {
+    sets.push('display_name = ?');
+    vals.push(fields.display_name);
+  }
+  if (sets.length === 0) return;
+  db.prepare(`UPDATE tenants SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
+}
 
 export function createTenant(t: {
   slug: string;
