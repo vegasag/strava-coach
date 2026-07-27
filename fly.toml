@@ -5,7 +5,6 @@ primary_region = 'arn'
 
 [env]
   DB_PATH = '/data/data.db'
-  PROFILE_PATH = '/data/user_profile.json'
 
 [http_service]
   internal_port = 8080
