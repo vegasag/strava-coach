@@ -73,11 +73,47 @@ function isAdmin(c: any): boolean {
   return verifySigned(getCookie(c, 'admin'), 'admin');
 }
 
+// Enkel brute-force-brems på admin-login: teller feilforsøk per IP og
+// låser i økende intervaller. Nullstilles ved vellykket innlogging.
+const loginAttempts = new Map<string, { fails: number; blockedUntil: number }>();
+
+function clientIp(c: any): string {
+  return (
+    c.req.header('fly-client-ip') ??
+    c.req.header('x-forwarded-for')?.split(',')[0].trim() ??
+    'local'
+  );
+}
+
+// Fri de 3 første forsøkene, deretter 5s, 10s, 20s … opp til 5 min.
+function blockedSeconds(ip: string): number {
+  const rec = loginAttempts.get(ip);
+  if (!rec) return 0;
+  const left = rec.blockedUntil - Date.now();
+  return left > 0 ? Math.ceil(left / 1000) : 0;
+}
+
+function registerFail(ip: string) {
+  const rec = loginAttempts.get(ip) ?? { fails: 0, blockedUntil: 0 };
+  rec.fails++;
+  if (rec.fails > 3) {
+    const delay = Math.min(5000 * 2 ** (rec.fails - 4), 5 * 60 * 1000);
+    rec.blockedUntil = Date.now() + delay;
+  }
+  loginAttempts.set(ip, rec);
+}
+
 
 // Delt sync-logikk for både tenant-endepunkt og admin-trigget sync.
 async function runSync(
   tenant: Tenant,
-  opts: { deep?: boolean; years?: number; detailsOnly?: boolean },
+  opts: {
+    deep?: boolean;
+    years?: number;
+    detailsOnly?: boolean;
+    maxActivities?: number;
+    maxDetails?: number;
+  },
 ) {
   const deep = opts.deep ?? false;
   const detailsOnly = opts.detailsOnly ?? false;
@@ -107,6 +143,7 @@ async function runSync(
       for (const a of batch) saveActivity(tenant.id, tenant.athlete_id!, a);
       total += batch.length;
       if (batch.length < 50) break;
+      if (opts.maxActivities && total >= opts.maxActivities) break;
       page++;
       if (page > maxPages) break;
     }
@@ -116,6 +153,7 @@ async function runSync(
   let details = 0;
   let errors = 0;
   for (const actId of needDetail) {
+    if (opts.maxDetails && details >= opts.maxDetails) break;
     try {
       const detail = await getActivityDetail(tenant, actId);
       saveActivityDetail(actId, detail);
@@ -140,10 +178,17 @@ async function runSync(
 // ============================================================
 
 app.post('/admin/api/login', async (c) => {
+  const ip = clientIp(c);
+  const wait = blockedSeconds(ip);
+  if (wait > 0) {
+    return c.json({ error: `for mange forsøk – vent ${wait} sek`, retry_after: wait }, 429);
+  }
   const { password } = await c.req.json().catch(() => ({}));
   if (ADMIN_PASSWORD && (!password || !safeEqual(String(password), ADMIN_PASSWORD))) {
+    registerFail(ip);
     return c.json({ error: 'feil passord' }, 401);
   }
+  loginAttempts.delete(ip);
   setAuthCookie(c, 'admin', 'admin');
   return c.json({ ok: true });
 });
@@ -255,7 +300,22 @@ app.get('/:slug/api/status', (c) => {
     display_name: tenant.display_name,
     slug: tenant.slug,
     max_hr: tenant.max_hr,
+    activity_count: countActivities(tenant.id),
   });
+});
+
+// Engangsimport av historikk. Henter opptil 500 økter (sammendrag) og et
+// begrenset antall detaljer – resten hentes gradvis av vanlig sync.
+app.post('/:slug/api/import', async (c) => {
+  const tenant = c.get('tenant');
+  if (!getTokensByTenant(tenant.id)) return c.json({ error: 'not connected' }, 401);
+  const r = await runSync(tenant, {
+    deep: true,
+    years: 10,
+    maxActivities: 500,
+    maxDetails: 60,
+  });
+  return c.json({ ...r, activity_count: countActivities(tenant.id) });
 });
 
 app.post('/:slug/api/sync', async (c) => {

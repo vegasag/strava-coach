@@ -15,7 +15,12 @@ type Activity = {
 type Status =
   | { state: 'loading' }
   | { state: 'unknown' }
-  | { state: 'ready'; connected: boolean; display_name: string };
+  | {
+      state: 'ready';
+      connected: boolean;
+      display_name: string;
+      activity_count: number;
+    };
 
 export function TenantApp({ slug }: { slug: string }) {
   const [status, setStatus] = useState<Status>({ state: 'loading' });
@@ -25,6 +30,8 @@ export function TenantApp({ slug }: { slug: string }) {
   const [exportText, setExportText] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState('');
 
   const api = (path: string) => `/${slug}${path}`;
 
@@ -36,6 +43,7 @@ export function TenantApp({ slug }: { slug: string }) {
           state: 'ready',
           connected: d.connected,
           display_name: d.display_name,
+          activity_count: d.activity_count ?? 0,
         }),
       )
       .catch(() => setStatus({ state: 'unknown' }));
@@ -84,8 +92,35 @@ export function TenantApp({ slug }: { slug: string }) {
     try {
       await fetch(api('/api/sync'), { method: 'POST' });
       await loadActivities();
+      loadStatus();
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function importHistory() {
+    setImporting(true);
+    setImportResult('');
+    try {
+      const r = await fetch(api('/api/import'), { method: 'POST' });
+      const d = await r.json();
+      if (d.error) {
+        setImportResult(`Feil: ${d.error}`);
+        return;
+      }
+      setImportResult(
+        `Importerte ${d.synced} økter. ${
+          d.remaining > 0
+            ? `${d.remaining} mangler detaljer – trykk «Hent nye økter» igjen senere.`
+            : 'Alle detaljer hentet.'
+        }`,
+      );
+      await loadActivities();
+      loadStatus();
+    } catch (e: any) {
+      setImportResult(`Feil: ${e.message}`);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -125,6 +160,24 @@ export function TenantApp({ slug }: { slug: string }) {
           {syncing ? 'Synkroniserer…' : 'Hent nye økter'}
         </button>
       </header>
+
+      {status.activity_count <= 10 && (
+        <section className="import-box">
+          <h2>Importer historiske data</h2>
+          <p className="import-hint">
+            Du har {status.activity_count} økter lagret. Hent inn opptil 500
+            tidligere økter fra Strava. Dette tar litt tid.
+          </p>
+          <button
+            className="btn primary"
+            onClick={importHistory}
+            disabled={importing}
+          >
+            {importing ? 'Importerer…' : 'Importer historiske data'}
+          </button>
+          {importResult && <p className="import-result">{importResult}</p>}
+        </section>
+      )}
 
       <section>
         <h2>Siste 8 uker ({activities.length} økter)</h2>
