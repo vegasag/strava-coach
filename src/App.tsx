@@ -108,13 +108,17 @@ export function TenantApp({ slug }: { slug: string }) {
         setImportResult(`Feil: ${d.error}`);
         return;
       }
-      setImportResult(
-        `Importerte ${d.synced} økter. ${
-          d.remaining > 0
-            ? `${d.remaining} mangler detaljer – trykk «Hent nye økter» igjen senere.`
-            : 'Alle detaljer hentet.'
-        }`,
-      );
+      if (d.imported === 0) {
+        setImportResult('Fant ingen eldre økter å importere.');
+      } else {
+        setImportResult(
+          `Importerte ${d.imported} økter (totalt ${d.activity_count}).` +
+            (d.more_available ? ' Trykk igjen for å hente eldre økter.' : '') +
+            (d.missing_details > 0
+              ? ` ${d.missing_details} mangler detaljer – trykk «Hent nye økter» senere.`
+              : ''),
+        );
+      }
       await loadActivities();
       loadStatus();
     } catch (e: any) {
@@ -161,12 +165,12 @@ export function TenantApp({ slug }: { slug: string }) {
         </button>
       </header>
 
-      {status.activity_count <= 10 && (
+      {(status.activity_count <= 10 || importResult) && (
         <section className="import-box">
           <h2>Importer historiske data</h2>
           <p className="import-hint">
-            Du har {status.activity_count} økter lagret. Hent inn opptil 500
-            tidligere økter fra Strava. Dette tar litt tid.
+            Du har {status.activity_count} økter lagret. Hver import henter de
+            50 neste øktene bakover i tid – trykk flere ganger for å hente mer.
           </p>
           <button
             className="btn primary"

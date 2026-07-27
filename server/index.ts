@@ -15,6 +15,7 @@ import {
   saveActivityDetail,
   getActivitiesWithoutDetail,
   getLatestActivityDate,
+  getOldestActivityDate,
   createTenant,
   getTenantById,
   getTenantBySlug,
@@ -304,18 +305,57 @@ app.get('/:slug/api/status', (c) => {
   });
 });
 
-// Engangsimport av historikk. Henter opptil 500 økter (sammendrag) og et
-// begrenset antall detaljer – resten hentes gradvis av vanlig sync.
+// Historisk import i porsjoner: henter de 50 øktene rett FØR den eldste vi
+// allerede har. Gjentatte klikk går derfor stadig lenger bakover i tid.
+const IMPORT_BATCH = 50;
+
 app.post('/:slug/api/import', async (c) => {
   const tenant = c.get('tenant');
   if (!getTokensByTenant(tenant.id)) return c.json({ error: 'not connected' }, 401);
-  const r = await runSync(tenant, {
-    deep: true,
-    years: 10,
-    maxActivities: 500,
-    maxDetails: 60,
+
+  const oldest = getOldestActivityDate(tenant.id);
+  const before = oldest
+    ? Math.floor(new Date(oldest).getTime() / 1000)
+    : Math.floor(Date.now() / 1000);
+
+  let imported = 0;
+  try {
+    const batch = await listActivities(tenant, {
+      before,
+      page: 1,
+      per_page: IMPORT_BATCH,
+    });
+    for (const a of batch) saveActivity(tenant.id, tenant.athlete_id!, a);
+    imported = batch.length;
+  } catch (e: any) {
+    return c.json({ error: `Strava: ${e.message}` }, 502);
+  }
+
+  // Hent detaljer for et begrenset antall, så vi holder oss innenfor
+  // Stravas 15-minutters-grense. Resten kommer via vanlig sync.
+  const needDetail = getActivitiesWithoutDetail(tenant.id);
+  let details = 0;
+  let errors = 0;
+  for (const actId of needDetail) {
+    if (details >= IMPORT_BATCH) break;
+    try {
+      const detail = await getActivityDetail(tenant, actId);
+      saveActivityDetail(actId, detail);
+      details++;
+      if (details % 2 === 0) await new Promise((r) => setTimeout(r, 1000));
+    } catch {
+      errors++;
+      if (errors > 3) break;
+    }
+  }
+
+  return c.json({
+    imported,
+    details_fetched: details,
+    missing_details: Math.max(needDetail.length - details, 0),
+    more_available: imported === IMPORT_BATCH,
+    activity_count: countActivities(tenant.id),
   });
-  return c.json({ ...r, activity_count: countActivities(tenant.id) });
 });
 
 app.post('/:slug/api/sync', async (c) => {

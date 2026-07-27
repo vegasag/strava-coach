@@ -111,13 +111,14 @@ async function authedFetch(
 
 export async function listActivities(
   tenant: Tenant,
-  opts: { after?: number; page?: number; per_page?: number },
+  opts: { after?: number; before?: number; page?: number; per_page?: number },
 ) {
   const params: Record<string, string> = {
     per_page: String(opts.per_page ?? 50),
     page: String(opts.page ?? 1),
   };
   if (opts.after) params.after = String(opts.after);
+  if (opts.before) params.before = String(opts.before);
   return authedFetch(tenant, '/athlete/activities', params) as Promise<any[]>;
 }
 

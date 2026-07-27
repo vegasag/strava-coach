@@ -253,6 +253,16 @@ export function getLatestActivityDate(tenantId: number): string | undefined {
   return row?.start_date;
 }
 
+export function getOldestActivityDate(tenantId: number): string | undefined {
+  const row = db
+    .prepare(
+      `SELECT start_date FROM activities
+       WHERE tenant_id = ? ORDER BY start_date ASC LIMIT 1`,
+    )
+    .get(tenantId) as { start_date: string } | undefined;
+  return row?.start_date;
+}
+
 export function countActivities(tenantId: number): number {
   const { n } = db
     .prepare('SELECT COUNT(*) AS n FROM activities WHERE tenant_id = ?')
