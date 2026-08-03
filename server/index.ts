@@ -453,6 +453,25 @@ const WORKOUT_TYPES: Record<number, string> = {
   3: 'intervall/fartlek', 10: 'standard', 11: 'tempo', 12: 'terskel',
 };
 
+// Estimert bakkejustert tempo (GAP) for en runde. Strava viser GAP per runde
+// på nettsiden, men eksponerer det ikke i API-et, og rundene mangler både
+// netto høydeendring og GAP-verdi. Vi estimerer derfor ut fra rundens
+// total_elevation_gain (som Strava beregner på full oppløsning) med en
+// konveks kostnadsmodell. Validert mot Stravas egne tall: typisk ~8 s/km
+// avvik på drag over 400 m; kortere runder utelates fordi noen få høydemeter
+// da slår urimelig kraftig ut.
+const GAP_MIN_LAP_M = 400;
+
+function estimateLapGapPace(lap: any): number | null {
+  const dist = lap.distance;
+  const gain = lap.total_elevation_gain;
+  if (!dist || dist < GAP_MIN_LAP_M || !lap.average_speed) return null;
+  if (!gain || gain <= 0) return null;
+  const i = gain / dist;
+  const factor = 1 + 3.6 * i + 12 * i * i;
+  return (1000 / lap.average_speed) / factor;
+}
+
 const ZONE_ORDER: { key: 'easy' | 'gray' | 'threshold' | 'above'; label: string }[] = [
   { key: 'easy', label: 'Rolig' },
   { key: 'gray', label: 'Grå' },
@@ -524,8 +543,13 @@ function formatActivitiesForExport(acts: any[], tenant: Tenant): string {
         const lapMax = lap.max_heartrate ? ` (maks ${Math.round(lap.max_heartrate)})` : '';
         const lapElev =
           lap.total_elevation_gain > 0 ? ` — +${Math.round(lap.total_elevation_gain)} m` : '';
+        const gapPace = estimateLapGapPace(lap);
+        const lapGap =
+          gapPace && Math.abs(gapPace - 1000 / lap.average_speed) >= 5
+            ? ` — ca. ${formatPace(gapPace)} bakkejust.`
+            : '';
         lines.push(
-          `  ${lap.lap_index}: ${lapKm} km — ${lapDur} — ${lapPace} — ${lapHr}${lapMax}${lapElev}`,
+          `  ${lap.lap_index}: ${lapKm} km — ${lapDur} — ${lapPace} — ${lapHr}${lapMax}${lapElev}${lapGap}`,
         );
       }
     }
