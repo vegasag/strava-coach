@@ -502,7 +502,6 @@ function formatActivitiesForExport(acts: any[], tenant: Tenant): string {
     if (detail?.perceived_exertion) meta.push(`RPE: ${detail.perceived_exertion}/10`);
     if (detail?.suffer_score) meta.push(`Rel. innsats: ${detail.suffer_score}`);
     if (detail?.average_cadence) meta.push(`Kadens: ${Math.round(detail.average_cadence * 2)} spm`);
-    if (a.total_elevation_gain > 0) meta.push(`Høyde: +${Math.round(a.total_elevation_gain)} m`);
     if (detail?.workout_type != null && detail.workout_type !== 0) {
       const wt = WORKOUT_TYPES[detail.workout_type];
       if (wt) meta.push(`Økttype: ${wt}`);
@@ -522,16 +521,15 @@ function formatActivitiesForExport(acts: any[], tenant: Tenant): string {
         const lapPace = lap.average_speed > 0 ? formatPace(1000 / lap.average_speed) : '–';
         const lapHr = lap.average_heartrate ? `${Math.round(lap.average_heartrate)} bpm` : '–';
         const lapMax = lap.max_heartrate ? ` (maks ${Math.round(lap.max_heartrate)})` : '';
-        const lapElev =
-          lap.total_elevation_gain > 0 ? ` — +${Math.round(lap.total_elevation_gain)} m` : '';
         lines.push(
-          `  ${lap.lap_index}: ${lapKm} km — ${lapDur} — ${lapPace} — ${lapHr}${lapMax}${lapElev}`,
+          `  ${lap.lap_index}: ${lapKm} km — ${lapDur} — ${lapPace} — ${lapHr}${lapMax}`,
         );
       }
     }
 
-    // Km-splits vises for jevne løp (uten rundestruktur). GAP = bakkejustert
-    // fart, tas kun med når den avviker merkbart fra faktisk fart.
+    // Km-splits vises for jevne løp (uten rundestruktur).
+    // Høydedata utelates bevisst – klokkas barometer gir urealistiske verdier.
+    // Det gjelder også bakkejustert fart, som Strava utleder fra samme data.
     const splits = detail?.splits_metric ?? [];
     if (!hasLaps && splits.length > 1) {
       lines.push('');
@@ -539,20 +537,8 @@ function formatActivitiesForExport(acts: any[], tenant: Tenant): string {
       for (const s of splits) {
         if (!s.average_speed) continue;
         const pace = formatPace(1000 / s.average_speed);
-        const gapSec = s.average_grade_adjusted_speed
-          ? 1000 / s.average_grade_adjusted_speed
-          : null;
-        const paceSec = 1000 / s.average_speed;
-        const gap =
-          gapSec && Math.abs(gapSec - paceSec) >= 5
-            ? ` · bakkejust. ${formatPace(gapSec)}`
-            : '';
         const hr = s.average_heartrate ? ` · ${Math.round(s.average_heartrate)} bpm` : '';
-        const elev =
-          s.elevation_difference && Math.abs(s.elevation_difference) >= 5
-            ? ` · ${s.elevation_difference > 0 ? '+' : ''}${Math.round(s.elevation_difference)} m`
-            : '';
-        lines.push(`  ${s.split}: ${pace}${gap}${hr}${elev}`);
+        lines.push(`  ${s.split}: ${pace}${hr}`);
       }
     }
 
